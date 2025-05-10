@@ -166,13 +166,51 @@ class ModBot(discord.Client):
                 ".remove <report_id> - Delete the offending message\n"
                 ".warn <report_id> [reason] - Send a warning to the user\n"
                 ".shadow_block <report_id> - Hide user's messages\n"
+                ".unshadow <user_id> - Remove shadow block from user\n"
                 ".block <report_id> - Block user from messaging\n"
+                ".unblock <user_id> - Remove block from user\n"
                 ".escalate <report_id> - Escalate to higher admin\n"
                 ".help - Show this help message\n"
             )
             await message.channel.send(usage)
         if cmd == 'help':
             await send_usage()
+            return
+        # Reverse offender enforcement commands
+        if cmd == 'unshadow':
+            if not args:
+                await message.channel.send("Please specify a user to unshadow. Use .help for commands.")
+                return
+            # Extract numeric ID from mention or ID string
+            import re
+            user_id_str = re.sub(r'\D', '', args[0])
+            try:
+                uid = int(user_id_str)
+            except ValueError:
+                await message.channel.send("Invalid user ID.")
+                return
+            if uid in self.shadow_blocked:
+                self.shadow_blocked.remove(uid)
+                await message.channel.send(f"User <@{uid}> is no longer shadow-blocked.")
+            else:
+                await message.channel.send(f"User <@{uid}> is not shadow-blocked.")
+            return
+        if cmd == 'unblock':
+            if not args:
+                await message.channel.send("Please specify a user to unblock. Use .help for commands.")
+                return
+            import re
+            user_id_str = re.sub(r'\D', '', args[0])
+            try:
+                uid = int(user_id_str)
+            except ValueError:
+                await message.channel.send("Invalid user ID.")
+                return
+            if uid in self.blocked_users:
+                self.blocked_users.remove(uid)
+                await message.channel.send(f"User <@{uid}> is no longer blocked.")
+            else:
+                await message.channel.send(f"User <@{uid}> is not blocked.")
             return
         if not args:
             await message.channel.send("Please specify a report ID. Use .help for commands.")
