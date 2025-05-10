@@ -131,7 +131,23 @@ class Report:
         guild = self.reported_message.guild
         mod_channel = self.client.mod_channels.get(guild.id)
         if mod_channel:
-            embed = discord.Embed(title="New Report", color=discord.Color.red())
+            # Assign unique report ID and store metadata
+            report_id = self.client.next_report_id
+            self.client.next_report_id += 1
+            self.client.report_store[report_id] = {
+                'report_id': report_id,
+                'reporter_id': self.reporter.id,
+                'abuse_type': self.abuse_type,
+                'subtype': self.subtype,
+                'report_link': self.report_link,
+                'offender_id': self.reported_message.author.id,
+                'guild_id': guild.id,
+                'channel_id': self.reported_message.channel.id,
+                'message_id': self.reported_message.id,
+                'context': self.context
+            }
+            embed = discord.Embed(title=f"New Report #{report_id}", color=discord.Color.red())
+            embed.set_footer(text=f"Report ID: {report_id}")
             embed.add_field(name="Reporter", value=self.reporter.mention, inline=True)
             embed.add_field(name="Abuse Type", value=self.abuse_type, inline=True)
             if self.subtype:

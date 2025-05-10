@@ -32,8 +32,14 @@ class ModBot(discord.Client):
         intents.message_content = True
         super().__init__(command_prefix='.', intents=intents)
         self.group_num = None
-        self.mod_channels = {} # Map from guild to the mod channel id for that guild
-        self.reports = {} # Map from user IDs to the state of their report
+        self.mod_channels = {}  # Map from guild to the mod channel id for that guild
+        self.reports = {}       # Map from user IDs to the state of their report
+        # Storage for completed reports and moderation actions
+        self.report_store = {}  # report_id -> metadata dict
+        self.next_report_id = 1  # incremental report ID
+        # Enforcement lists
+        self.shadow_blocked = set()  # user IDs whose messages are hidden
+        self.blocked_users = set()   # user IDs who are fully blocked
 
     async def on_ready(self):
         print(f'{self.user.name} has connected to Discord! It is these guilds:')
@@ -56,19 +62,36 @@ class ModBot(discord.Client):
         
 
     async def on_message(self, message):
-        '''
-        This function is called whenever a message is sent in a channel that the bot can see (including DMs). 
-        Currently the bot is configured to only handle messages that are sent over DMs or in your group's "group-#" channel. 
-        '''
-        # Ignore messages from the bot 
+        """Route messages: enforce shadow/block, handle main channel, mod commands, or DMs."""
+        # Ignore bot's own messages
         if message.author.id == self.user.id:
             return
 
-        # Check if this message was sent in a server ("guild") or if it's a DM
         if message.guild:
-            await self.handle_channel_message(message)
-        else:
-            await self.handle_dm(message)
+            # Enforce shadow-block: delete messages silently
+            if message.channel.name == f'group-{self.group_num}':
+                if message.author.id in self.shadow_blocked:
+                    await message.delete()
+                    return
+                if message.author.id in self.blocked_users:
+                    await message.delete()
+                    try:
+                        await message.author.send("You are blocked from sending messages here.")
+                    except discord.Forbidden:
+                        pass
+                    return
+                # Handle normal main channel messages
+                await self.handle_channel_message(message)
+                return
+            # Handle moderator commands in mod channel
+            if message.channel.name == f'group-{self.group_num}-mod':
+                await self.handle_mod_message(message)
+                return
+            # Other guild channels: ignore
+            return
+
+        # Direct messages (user reporting flow)
+        await self.handle_dm(message)
 
     async def handle_dm(self, message):
         # Handle a help message
@@ -126,6 +149,124 @@ class ModBot(discord.Client):
         '''
         return "Evaluated: '" + text+ "'"
 
+    async def handle_mod_message(self, message):
+        """Handle moderator commands in the mod channel."""
+        content = message.content.strip()
+        # Use '.' prefix for mod commands
+        if not content.startswith('.'):
+            return
+        parts = content[1:].split()
+        if not parts:
+            return
+        cmd = parts[0].lower()
+        args = parts[1:]
+        # Helper to send command usage
+        async def send_usage():
+            usage = (
+                "Moderator commands:\n"
+                ".dismiss <report_id> - No action\n"
+                ".remove <report_id> - Delete the offending message\n"
+                ".warn <report_id> [reason] - Send a warning to the user\n"
+                ".shadow_block <report_id> - Hide user's messages\n"
+                ".block <report_id> - Block user from messaging\n"
+                ".escalate <report_id> - Escalate to higher admin\n"
+                ".help - Show this help message\n"
+            )
+            await message.channel.send(usage)
+        if cmd == 'help':
+            await send_usage()
+            return
+        if not args:
+            await message.channel.send("Please specify a report ID. Use .help for commands.")
+            return
+        # Parse report ID
+        try:
+            report_id = int(args[0])
+        except ValueError:
+            await message.channel.send("Report ID must be a number.")
+            return
+        if report_id not in self.report_store:
+            await message.channel.send(f"Report ID {report_id} not found.")
+            return
+        report = self.report_store[report_id]
+        guild = self.get_guild(report['guild_id'])
+        # Dismiss command
+        if cmd == 'dismiss':
+            del self.report_store[report_id]
+            await message.channel.send(f"Report {report_id} dismissed (no action).")
+            return
+        # Remove offending message
+        if cmd == 'remove':
+            try:
+                channel = guild.get_channel(report['channel_id'])
+                msg = await channel.fetch_message(report['message_id'])
+                await msg.delete()
+                await message.channel.send(f"Offending message deleted for report {report_id}.")
+            except Exception as e:
+                await message.channel.send(f"Error deleting message: {e}")
+            del self.report_store[report_id]
+            return
+        # Warn the user via DM
+        if cmd == 'warn':
+            reason = ' '.join(args[1:]) if len(args) > 1 else None
+            offender = guild.get_member(report['offender_id'])
+            warning_text = f"Your message was flagged as {report['abuse_type']}."
+            if reason:
+                warning_text += f" Reason: {reason}"
+            if offender:
+                try:
+                    await offender.send(warning_text)
+                    await message.channel.send(f"Warning sent to {offender.mention} for report {report_id}.")
+                except discord.Forbidden:
+                    await message.channel.send("Could not DM the user.")
+            else:
+                await message.channel.send("User not found in guild.")
+            del self.report_store[report_id]
+            return
+        # Shadow block: hide user's messages
+        if cmd == 'shadow_block':
+            self.shadow_blocked.add(report['offender_id'])
+            await message.channel.send(f"User <@{report['offender_id']}> has been shadow-blocked.")
+            del self.report_store[report_id]
+            return
+        # Block: remove and notify user
+        if cmd == 'block':
+            self.blocked_users.add(report['offender_id'])
+            offender = guild.get_member(report['offender_id'])
+            if offender:
+                try:
+                    await offender.send("You have been blocked from sending messages here.")
+                except discord.Forbidden:
+                    pass
+            await message.channel.send(f"User <@{report['offender_id']}> has been blocked.")
+            del self.report_store[report_id]
+            return
+        # Escalate to higher admin
+        if cmd == 'escalate':
+            await message.channel.send(f"Report {report_id} escalated to higher admin.")
+            del self.report_store[report_id]
+            return
+        # Unknown command
+        await message.channel.send("Unknown command. Use .help for a list of moderator commands.")
+
+    async def on_reaction_add(self, reaction, user):
+        """When a user reacts with a flag emoji, prompt them to DM the bot for a report."""
+        # Ignore reactions by the bot
+        if user.id == self.user.id:
+            return
+        # Only consider main channel reactions
+        channel = reaction.message.channel
+        if channel.name != f'group-{self.group_num}':
+            return
+        # Use 🚩 emoji for flagging
+        if str(reaction.emoji) == '🚩':
+            link = reaction.message.jump_url
+            try:
+                await user.send(
+                    f"You flagged a message. To report this, please DM me 'report' and paste this link: {link}"
+                )
+            except discord.Forbidden:
+                print(f"Cannot DM user {user.id} to initiate report.")
 
 client = ModBot()
 client.run(discord_token)
