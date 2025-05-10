@@ -162,6 +162,8 @@ class ModBot(discord.Client):
         async def send_usage():
             usage = (
                 "Moderator commands:\n"
+                ".list_reports - List all pending reports\n"
+                ".show <report_id> - Show details of a pending report\n"
                 ".dismiss <report_id> - No action\n"
                 ".remove <report_id> - Delete the offending message\n"
                 ".warn <report_id> [reason] - Send a warning to the user\n"
@@ -175,6 +177,54 @@ class ModBot(discord.Client):
             await message.channel.send(usage)
         if cmd == 'help':
             await send_usage()
+            return
+        # List all open report IDs with summaries
+        if cmd == 'list_reports':
+            if not self.report_store:
+                await message.channel.send("No pending reports.")
+            else:
+                lines = ["Reports (including resolved):"]
+                for rid, data in self.report_store.items():
+                    status = data.get('status', 'pending')
+                    lines.append(
+                        f"#{rid}: {data['abuse_type'].title()} (status: {status}), reporter <@{data['reporter_id']}>, offender <@{data['offender_id']}>"
+                    )
+                await message.channel.send("\n".join(lines))
+            return
+        # Show detailed embed for a specific report
+        if cmd == 'show':
+            if not args:
+                await message.channel.send("Please specify a report ID. Use .help for commands.")
+                return
+            try:
+                rid = int(args[0])
+            except ValueError:
+                await message.channel.send("Report ID must be an integer.")
+                return
+            if rid not in self.report_store:
+                await message.channel.send(f"Report ID {rid} not found.")
+                return
+            # Reconstruct and send an embed using stored metadata
+            data = self.report_store[rid]
+            embed = discord.Embed(title=f"Report #{rid} Details", color=discord.Color.blue())
+            embed.set_footer(text=f"Report ID: {rid}")
+            embed.add_field(name="Reporter", value=f"<@{data['reporter_id']}>", inline=True)
+            embed.add_field(name="Category", value=data['abuse_type'], inline=True)
+            if data.get('subtype'):
+                embed.add_field(name="Subtype", value=data['subtype'], inline=True)
+            if 'filter_opt_in' in data and data['filter_opt_in'] is not None:
+                embed.add_field(name="Filter Opt-In", value=str(data['filter_opt_in']), inline=True)
+            if 'block_opt_in' in data and data['block_opt_in'] is not None:
+                embed.add_field(name="Block Opt-In", value=str(data['block_opt_in']), inline=True)
+            # violation history
+            hist = self.violation_history.get(data['offender_id'], 0)
+            embed.add_field(name="Culprit history of violations", value=str(hist), inline=False)
+            embed.add_field(name="Message Link", value=data['report_link'], inline=False)
+            embed.add_field(name="Offending User", value=f"<@{data['offender_id']}>", inline=True)
+            if data.get('context'):
+                ctx = data['context']
+                embed.add_field(name="Context", value=(ctx[:1020] + '...') if len(ctx) > 1024 else ctx, inline=False)
+            await message.channel.send(embed=embed)
             return
         # Reverse offender enforcement commands
         if cmd == 'unshadow':
@@ -228,8 +278,9 @@ class ModBot(discord.Client):
         guild = self.get_guild(report['guild_id'])
         # Dismiss command
         if cmd == 'dismiss':
-            del self.report_store[report_id]
-            await message.channel.send(f"Report {report_id} dismissed (no action).")
+            # Mark as dismissed without removing
+            self.report_store[report_id]['status'] = 'dismissed'
+            await message.channel.send(f"Report {report_id} dismissed (no action). Report retained for further actions.")
             return
         # Remove offending message
         if cmd == 'remove':
@@ -240,47 +291,57 @@ class ModBot(discord.Client):
                 await message.channel.send(f"Offending message deleted for report {report_id}.")
             except Exception as e:
                 await message.channel.send(f"Error deleting message: {e}")
-            del self.report_store[report_id]
+            self.report_store[report_id]['status'] = 'removed'
             return
         # Warn the user via DM
         if cmd == 'warn':
             reason = ' '.join(args[1:]) if len(args) > 1 else None
-            offender = guild.get_member(report['offender_id'])
             warning_text = f"Your message was flagged as {report['abuse_type']}."
             if reason:
                 warning_text += f" Reason: {reason}"
+            # Attempt to fetch the user object directly
+            offender = None
+            try:
+                offender = await self.fetch_user(report['offender_id'])
+            except Exception:
+                pass
             if offender:
                 try:
                     await offender.send(warning_text)
-                    await message.channel.send(f"Warning sent to {offender.mention} for report {report_id}.")
                 except discord.Forbidden:
-                    await message.channel.send("Could not DM the user.")
+                    pass
+                await message.channel.send(f"Warning sent to {offender.mention} for report {report_id}.")
             else:
-                await message.channel.send("User not found in guild.")
-            del self.report_store[report_id]
+                await message.channel.send("Could not find user to warn.")
+            self.report_store[report_id]['status'] = 'warned'
             return
         # Shadow block: hide user's messages
         if cmd == 'shadow_block':
             self.shadow_blocked.add(report['offender_id'])
-            await message.channel.send(f"User <@{report['offender_id']}> has been shadow-blocked.")
-            del self.report_store[report_id]
+            self.report_store[report_id]['status'] = 'shadow_blocked'
+            await message.channel.send(f"User <@{report['offender_id']}> has been shadow-blocked. Report retained.")
             return
-        # Block: remove and notify user
+        # Block: add to block-list and notify user
         if cmd == 'block':
             self.blocked_users.add(report['offender_id'])
-            offender = guild.get_member(report['offender_id'])
+            # Notify user via DM
+            offender = None
+            try:
+                offender = await self.fetch_user(report['offender_id'])
+            except Exception:
+                pass
             if offender:
                 try:
                     await offender.send("You have been blocked from sending messages here.")
                 except discord.Forbidden:
                     pass
-            await message.channel.send(f"User <@{report['offender_id']}> has been blocked.")
-            del self.report_store[report_id]
+            self.report_store[report_id]['status'] = 'blocked'
+            await message.channel.send(f"User <@{report['offender_id']}> has been blocked. Report retained.")
             return
         # Escalate to higher admin
         if cmd == 'escalate':
-            await message.channel.send(f"Report {report_id} escalated to higher admin.")
-            del self.report_store[report_id]
+            self.report_store[report_id]['status'] = 'escalated'
+            await message.channel.send(f"Report {report_id} escalated to higher admin. Report retained.")
             return
         # Unknown command
         await message.channel.send("Unknown command. Use .help for a list of moderator commands.")

@@ -162,7 +162,8 @@ class Report:
             'guild_id': guild.id,
             'channel_id': self.reported_message.channel.id,
             'message_id': self.reported_message.id,
-            'context': self.context
+            'context': self.context,
+            'status': 'pending'
         }
         # Build embed
         embed = discord.Embed(title=f"New Report #{report_id}", color=discord.Color.red())
