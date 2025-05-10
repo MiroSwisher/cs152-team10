@@ -3,162 +3,187 @@ import discord
 import re
 
 class State(Enum):
-    REPORT_START = auto()
-    AWAITING_MESSAGE = auto()
-    MESSAGE_IDENTIFIED = auto()
-    AWAITING_ABUSE_TYPE = auto()
-    AWAITING_SUBTYPE = auto()
+    SELECT_CATEGORY = auto()
+    SELECT_DANGER_TYPE = auto()
+    AWAITING_DANGER_ACK = auto()
+    SELECT_HATE_SUBTYPE = auto()
+    SELECT_HATE_FILTER = auto()
+    SELECT_EXPLICIT_SUBTYPE = auto()
+    SELECT_EXPLICIT_BLOCK = auto()
     AWAITING_CONTEXT = auto()
-    AWAITING_CONFIRM = auto()
     REPORT_COMPLETE = auto()
 
 class Report:
-    START_KEYWORD = "report"
     CANCEL_KEYWORD = "cancel"
     HELP_KEYWORD = "help"
 
-    def __init__(self, client):
-        self.state = State.REPORT_START
+    def __init__(self, client, reporter, reported_message):
         self.client = client
-        # Reporter and report data
-        self.reporter = None
-        self.reported_message = None
-        self.report_link = None
+        self.reporter = reporter
+        self.reported_message = reported_message
+        self.report_link = reported_message.jump_url
         self.abuse_type = None
         self.subtype = None
+        self.filter_opt_in = None
+        self.block_opt_in = None
         self.context = None
-        self.message = None
+        self.state = State.SELECT_CATEGORY
     
     async def handle_message(self, message):
-        '''
-        This function makes up the meat of the user-side reporting flow. It defines how we transition between states and what 
-        prompts to offer at each of those states. You're welcome to change anything you want; this skeleton is just here to
-        get you started and give you a model for working with Discord. 
-        '''
+        """
+        Handle each DM message from the user and advance the report flow per state.
+        """
 
-        if message.content == self.CANCEL_KEYWORD:
+        # Allow cancellation
+        if message.content.lower() == self.CANCEL_KEYWORD:
             self.state = State.REPORT_COMPLETE
             return ["Report cancelled."]
-        
-        if self.state == State.REPORT_START:
-            # Initialize reporter and prompt for message link
-            self.reporter = message.author
-            reply = "Thank you for keeping our community safe! Please note that false reporting may lead to disciplinary action.\n\n"
-            reply += "Please copy paste the link to the message you want to report.\n"
-            reply += "You can obtain this link by right-clicking the message and clicking `Copy Message Link`."
-            self.state = State.AWAITING_MESSAGE
-            return [reply]
-        
-        if self.state == State.AWAITING_MESSAGE:
-            # Parse out the three ID strings from the message link
-            m = re.search('/(\d+)/(\d+)/(\d+)', message.content)
-            if not m:
-                return ["I'm sorry, I couldn't read that link. Please try again or say `cancel` to cancel."]
-            guild = self.client.get_guild(int(m.group(1)))
-            if not guild:
-                return ["I cannot accept reports of messages from guilds that I'm not in. Please have the guild owner add me to the guild and try again."]
-            channel = guild.get_channel(int(m.group(2)))
-            if not channel:
-                return ["It seems this channel was deleted or never existed. Please try again or say `cancel` to cancel."]
-            try:
-                reported_msg = await channel.fetch_message(int(m.group(3)))
-            except discord.errors.NotFound:
-                return ["It seems this message was deleted or never existed. Please try again or say `cancel` to cancel."]
 
-            # Store the reported message and prompt for abuse type
-            self.reported_message = reported_msg
-            self.report_link = reported_msg.jump_url
-            self.state = State.AWAITING_ABUSE_TYPE
-            return [
-                "I found this message:",
-                f"```{reported_msg.author.name}: {reported_msg.content}```",
-                "Which abuse type are you reporting? Options: hate speech, harassment, explicit content, misinformation, other."
-            ]
-        
-        # Detailed reporting flow for hate speech
-        if self.state == State.AWAITING_ABUSE_TYPE:
-            choice = message.content.lower()
-            valid = ["hate speech", "harassment", "explicit content", "misinformation", "other"]
-            if choice not in valid:
-                return ["Please choose one of: hate speech, harassment, explicit content, misinformation, other."]
-            self.abuse_type = choice
-            if choice != "hate speech":
-                await self.forward_to_mod()
-                self.state = State.REPORT_COMPLETE
-                return [f"Thank you! Your {choice} report has been submitted to our moderators for review."]
-            self.state = State.AWAITING_SUBTYPE
-            return ["Please specify the subtype of hate speech: racial slurs, religious hate, transphobia, other."]
+        # Step 1: Category selection
+        text = message.content.strip().lower()
+        if self.state == State.SELECT_CATEGORY:
+            options = {
+                "imminent danger": "imminent danger",
+                "hate speech": "hate speech",
+                "explicit content": "explicit content"
+            }
+            if text not in options:
+                return ["Please choose one of: Imminent Danger, Hate Speech, Explicit Content."]
+            self.abuse_type = options[text]
+            if self.abuse_type == "imminent danger":
+                self.state = State.SELECT_DANGER_TYPE
+                return ["Which type of danger?\n• Suicide or Self-Harm\n• Threat of Violence"]
+            elif self.abuse_type == "hate speech":
+                self.state = State.SELECT_HATE_SUBTYPE
+                return ["Which abuse type are you reporting?\n• Racial Slurs\n• Homophobic Language\n• Sexist Language\n• Other hate/harassment"]
+            else:
+                self.state = State.SELECT_EXPLICIT_SUBTYPE
+                return ["Which category best describes the content?\n• Child Sexual Abuse Material\n• Unwanted Sexual Content\n• Sexual Harassment\n• Other explicit content"]
 
-        if self.state == State.AWAITING_SUBTYPE:
-            subtype = message.content.lower()
-            valid_subs = ["racial slurs", "religious hate", "transphobia", "other"]
-            if subtype not in valid_subs:
-                return ["Please choose one of: racial slurs, religious hate, transphobia, other."]
-            self.subtype = subtype
+        # Step 2a: Imminent Danger subtype
+        if self.state == State.SELECT_DANGER_TYPE:
+            valid = ["suicide or self-harm", "threat of violence"]
+            if text not in valid:
+                return ["Please choose one of: Suicide or Self-Harm, Threat of Violence."]
+            self.subtype = text
+            if text == "suicide or self-harm":
+                self.state = State.AWAITING_DANGER_ACK
+                return [
+                    "If you or someone you know is struggling, please reach out:\n"
+                    "– U.S. Suicide Prevention Helpline: 988 or 1-800-273-TALK (8255)\n"
+                    "– International: https://findahelpline.com\n\n"
+                    "Type 'next' to continue."
+                ]
+            else:
+                self.state = State.AWAITING_CONTEXT
+                return ["Thank you! Would you like to add any comments or attach a screenshot? Type 'skip' to skip."]
+
+        # Step 2b: Acknowledge helpline
+        if self.state == State.AWAITING_DANGER_ACK:
+            if text != "next":
+                return ["Please type 'next' to continue."]
             self.state = State.AWAITING_CONTEXT
-            return ["Would you like to provide additional context or attachments? Send your message now or type 'skip' to skip."]
+            return ["Thank you! Would you like to add any comments or attach a screenshot? Type 'skip' to skip."]
 
+        # Step 2c: Hate Speech subtype
+        if self.state == State.SELECT_HATE_SUBTYPE:
+            valid = ["racial slurs", "homophobic language", "sexist language", "other hate/harassment"]
+            if text not in valid:
+                return ["Please choose one of: Racial Slurs, Homophobic Language, Sexist Language, Other hate/harassment."]
+            self.subtype = text
+            self.state = State.SELECT_HATE_FILTER
+            return ["Want to take further steps to prevent seeing this type of content? (Yes/No)"]
+
+        # Step 2d: Hate Speech filter opt-in
+        if self.state == State.SELECT_HATE_FILTER:
+            if text not in ["yes", "no"]:
+                return ["Please answer 'Yes' or 'No'."]
+            self.filter_opt_in = (text == "yes")
+            if self.filter_opt_in:
+                self.state = State.AWAITING_CONTEXT
+                return ["Would you like to filter out messages containing this content? (Yes/No)"]
+            else:
+                self.state = State.AWAITING_CONTEXT
+                return ["Thank you! Would you like to add any comments or attach a screenshot? Type 'skip' to skip."]
+
+        # Step 2e: Explicit Content subtype
+        if self.state == State.SELECT_EXPLICIT_SUBTYPE:
+            valid = ["child sexual abuse material", "unwanted sexual content", "sexual harassment", "other explicit content"]
+            if text not in valid:
+                return ["Please choose one of: Child Sexual Abuse Material, Unwanted Sexual Content, Sexual Harassment, Other explicit content."]
+            self.subtype = text
+            self.state = State.SELECT_EXPLICIT_BLOCK
+            return ["Would you like to block this account from contacting you? (Yes/No)"]
+
+        # Step 2f: Explicit Content block opt-in
+        if self.state == State.SELECT_EXPLICIT_BLOCK:
+            if text not in ["yes", "no"]:
+                return ["Please answer 'Yes' or 'No'."]
+            self.block_opt_in = (text == "yes")
+            self.state = State.AWAITING_CONTEXT
+            return ["Thank you! Would you like to add any comments? Type 'skip' to skip."]
+
+        # Step 3: Context / attachments
         if self.state == State.AWAITING_CONTEXT:
-            if message.content.lower() == "skip" and not message.attachments:
+            if text == "skip" and not message.attachments:
                 self.context = None
             else:
                 self.context = message.content
                 if message.attachments:
                     self.context += "\nAttachments:\n" + "\n".join(a.url for a in message.attachments)
-            self.state = State.AWAITING_CONFIRM
-            summary = f"Here is your report summary:\nMessage: {self.report_link}\nType: {self.abuse_type}"
-            if self.subtype:
-                summary += f"\nSubtype: {self.subtype}"
-            if self.context:
-                summary += f"\nContext: {self.context}"
-            summary += "\n\nType 'confirm' to submit your report or 'cancel' to cancel."
-            return [summary]
-
-        if self.state == State.AWAITING_CONFIRM:
-            cmd = message.content.lower()
-            if cmd == "confirm":
-                await self.forward_to_mod()
-                self.state = State.REPORT_COMPLETE
-                return ["Thank you! Your report has been submitted. Our moderators will review it shortly."]
-            elif cmd == "cancel":
-                self.state = State.REPORT_COMPLETE
-                return ["Report cancelled."]
-            else:
-                return ["Please type 'confirm' to submit your report or 'cancel' to cancel."]
+            self.state = State.REPORT_COMPLETE
+            await self.forward_to_mod()
+            return [
+                "Got it! We'll send this report to the moderation team for review. "
+                "Possible outcomes include: no action, post removal, legal referral, or ban for repeat violations."
+            ]
+        return []
 
     async def forward_to_mod(self):
         """Forward the completed report to the moderator channel as an embed."""
         guild = self.reported_message.guild
         mod_channel = self.client.mod_channels.get(guild.id)
-        if mod_channel:
-            # Assign unique report ID and store metadata
-            report_id = self.client.next_report_id
-            self.client.next_report_id += 1
-            self.client.report_store[report_id] = {
-                'report_id': report_id,
-                'reporter_id': self.reporter.id,
-                'abuse_type': self.abuse_type,
-                'subtype': self.subtype,
-                'report_link': self.report_link,
-                'offender_id': self.reported_message.author.id,
-                'guild_id': guild.id,
-                'channel_id': self.reported_message.channel.id,
-                'message_id': self.reported_message.id,
-                'context': self.context
-            }
-            embed = discord.Embed(title=f"New Report #{report_id}", color=discord.Color.red())
-            embed.set_footer(text=f"Report ID: {report_id}")
-            embed.add_field(name="Reporter", value=self.reporter.mention, inline=True)
-            embed.add_field(name="Abuse Type", value=self.abuse_type, inline=True)
-            if self.subtype:
-                embed.add_field(name="Subtype", value=self.subtype, inline=True)
-            embed.add_field(name="Message Link", value=self.report_link, inline=False)
-            embed.add_field(name="Offending User", value=self.reported_message.author.mention, inline=True)
-            if self.context:
-                embed.add_field(name="Context", value=(self.context[:1020] + '...') if len(self.context) > 1024 else self.context, inline=False)
-            await mod_channel.send(embed=embed)
-        else:
+        if not mod_channel:
             print(f"Mod channel not found for guild {guild.id}")
+            return
+        # Assign unique report ID
+        report_id = self.client.next_report_id
+        self.client.next_report_id += 1
+        # Store metadata
+        self.client.report_store[report_id] = {
+            'report_id': report_id,
+            'reporter_id': self.reporter.id,
+            'abuse_type': self.abuse_type,
+            'subtype': self.subtype,
+            'filter_opt_in': getattr(self, 'filter_opt_in', None),
+            'block_opt_in': getattr(self, 'block_opt_in', None),
+            'report_link': self.report_link,
+            'offender_id': self.reported_message.author.id,
+            'guild_id': guild.id,
+            'channel_id': self.reported_message.channel.id,
+            'message_id': self.reported_message.id,
+            'context': self.context
+        }
+        # Build embed
+        embed = discord.Embed(title=f"New Report #{report_id}", color=discord.Color.red())
+        embed.set_footer(text=f"Report ID: {report_id}")
+        embed.add_field(name="Reporter", value=self.reporter.mention, inline=True)
+        embed.add_field(name="Category", value=self.abuse_type, inline=True)
+        if self.subtype:
+            embed.add_field(name="Subtype", value=self.subtype, inline=True)
+        if hasattr(self, 'filter_opt_in'):
+            embed.add_field(name="Filter Opt-In", value=str(self.filter_opt_in), inline=True)
+        if hasattr(self, 'block_opt_in'):
+            embed.add_field(name="Block Opt-In", value=str(self.block_opt_in), inline=True)
+        # Add violation history for the offending user
+        offender_id = self.reported_message.author.id
+        history_count = self.client.violation_history.get(offender_id, 0)
+        embed.add_field(name="Culprit history of violations", value=str(history_count), inline=False)
+        embed.add_field(name="Message Link", value=self.report_link, inline=False)
+        embed.add_field(name="Offending User", value=self.reported_message.author.mention, inline=True)
+        if self.context:
+            embed.add_field(name="Context", value=(self.context[:1020] + '...') if len(self.context) > 1024 else self.context, inline=False)
+        await mod_channel.send(embed=embed)
 
     def report_complete(self):
         return self.state == State.REPORT_COMPLETE
