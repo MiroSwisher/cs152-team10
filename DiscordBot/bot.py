@@ -40,6 +40,10 @@ class ModBot(discord.Client):
         # Enforcement lists
         self.shadow_blocked = set()  # user IDs whose messages are hidden
         self.blocked_users = set()   # user IDs who are fully blocked
+        # Tracker for offenders' prior violation counts
+        self.violation_history = {}  # offender_id -> violation count
+        # Optional: track reporters for false-reporting flags
+        self.flagged_reporters = set()
 
     async def on_ready(self):
         print(f'{self.user.name} has connected to Discord! It is these guilds:')
