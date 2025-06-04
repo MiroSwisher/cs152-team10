@@ -392,6 +392,27 @@ class ModBot(discord.Client):
         Perform automated enforcement actions based on severity level.
         """
         offender_id = message.author.id
+        # Log automated flag as a report entry if severity >= 1
+        if severity >= 1:
+            report_id = self.next_report_id
+            self.next_report_id += 1
+            # Store automated report metadata
+            self.report_store[report_id] = {
+                'report_id': report_id,
+                'reporter_id': self.user.id,
+                'abuse_type': 'hate speech',
+                'subtype': self.severity_labels.get(severity),
+                'filter_opt_in': None,
+                'block_opt_in': None,
+                'report_link': message.jump_url,
+                'offender_id': offender_id,
+                'guild_id': message.guild.id,
+                'channel_id': message.channel.id,
+                'message_id': message.id,
+                'context': None,
+                'status': 'automated'
+            }
+        
         # Mild hate: delete + warning
         if severity == 1:
             await message.delete()
