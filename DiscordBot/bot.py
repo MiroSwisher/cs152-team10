@@ -8,6 +8,7 @@ import re
 import requests
 from report import Report
 import pdb
+from classifier import load_model, predict_severity
 
 # Set up logging to the console
 logger = logging.getLogger('discord')
@@ -44,6 +45,15 @@ class ModBot(discord.Client):
         self.violation_history = {}  # offender_id -> violation count
         # Optional: track reporters for false-reporting flags
         self.flagged_reporters = set()
+        # Load hate speech classifier and define severity labels
+        self.vectorizer, self.classifier = load_model()
+        self.severity_labels = {
+            0: "Non-Hateful",
+            1: "Mild Hate",
+            2: "Moderate Hate",
+            3: "Severe Hate",
+            4: "Extremist Hate"
+        }
 
     async def on_ready(self):
         print(f'{self.user.name} has connected to Discord! It is these guilds:')
@@ -124,28 +134,28 @@ class ModBot(discord.Client):
         if not message.channel.name == f'group-{self.group_num}':
             return
 
-        # Forward the message to the mod channel
+        # Automated detection and enforcement
+        severity = self.eval_text(message.content)
+        await self.take_action(severity, message)
+
+        # Forward the message to the mod channel with severity info
         mod_channel = self.mod_channels[message.guild.id]
         await mod_channel.send(f'Forwarded message:\n{message.author.name}: "{message.content}"')
-        scores = self.eval_text(message.content)
-        await mod_channel.send(self.code_format(scores))
+        await mod_channel.send(self.code_format(severity))
 
-    
     def eval_text(self, message):
-        ''''
-        TODO: Once you know how you want to evaluate messages in your channel, 
-        insert your code here! This will primarily be used in Milestone 3. 
-        '''
-        return message
+        """
+        Run the hate speech classifier and return a severity level (0-4).
+        """
+        return predict_severity(message, self.vectorizer, self.classifier)
 
-    
     def code_format(self, text):
-        ''''
-        TODO: Once you know how you want to show that a message has been 
-        evaluated, insert your code here for formatting the string to be 
-        shown in the mod channel. 
-        '''
-        return "Evaluated: '" + text+ "'"
+        """
+        Format the classifier output for the mod channel.
+        """
+        severity = text
+        label = self.severity_labels.get(severity, "Unknown")
+        return f"Automated detection severity: {severity} ({label})"
 
     async def handle_mod_message(self, message):
         """Handle moderator commands in the mod channel."""
@@ -367,15 +377,82 @@ class ModBot(discord.Client):
         # Create a new Report instance with the reported message
         reported_msg = reaction.message
         self.reports[user.id] = Report(self, user, reported_msg)
-        # Send initial prompt
+        # Send initial prompt with numeric options
         await dm_channel.send(
-            "Thanks for helping us protect our community! "
-            "Please state the kind of danger or abuse you're reporting.\n"
-            "Options:\n"
-            "• Imminent Danger\n"
-            "• Hate Speech\n"
-            "• Explicit Content"
+            "Thanks for helping us protect our community!\n"
+            "What type of abuse are you reporting?\n"
+            "1) Imminent Danger\n"
+            "2) Hate Speech\n"
+            "3) Explicit Content\n"
+            "Reply with the number of your choice."
         )
+
+    async def take_action(self, severity, message):
+        """
+        Perform automated enforcement actions based on severity level.
+        """
+        offender_id = message.author.id
+        # Log automated flag as a report entry if severity >= 1
+        if severity >= 1:
+            report_id = self.next_report_id
+            self.next_report_id += 1
+            # Store automated report metadata
+            self.report_store[report_id] = {
+                'report_id': report_id,
+                'reporter_id': self.user.id,
+                'abuse_type': 'hate speech',
+                'subtype': self.severity_labels.get(severity),
+                'filter_opt_in': None,
+                'block_opt_in': None,
+                'report_link': message.jump_url,
+                'offender_id': offender_id,
+                'guild_id': message.guild.id,
+                'channel_id': message.channel.id,
+                'message_id': message.id,
+                'context': None,
+                'status': 'automated'
+            }
+        
+        # Mild hate: delete + warning
+        if severity == 1:
+            await message.delete()
+            try:
+                await message.author.send(
+                    "Your message has been removed for mild hate speech (Severity 1). Please avoid derogatory language."
+                )
+            except discord.Forbidden:
+                pass
+            self.violation_history[offender_id] = self.violation_history.get(offender_id, 0) + 1
+        # Moderate hate: delete + shadow-block
+        elif severity == 2:
+            await message.delete()
+            self.shadow_blocked.add(offender_id)
+            self.violation_history[offender_id] = self.violation_history.get(offender_id, 0) + 1
+            mod_channel = self.mod_channels.get(message.guild.id)
+            if mod_channel:
+                await mod_channel.send(
+                    f"Automated detection: User <@{offender_id}> shadow-blocked for 24h (Severity 2: Moderate Hate). Original message: {message.jump_url}"
+                )
+        # Severe hate: delete + block
+        elif severity == 3:
+            await message.delete()
+            self.blocked_users.add(offender_id)
+            self.violation_history[offender_id] = self.violation_history.get(offender_id, 0) + 1
+            mod_channel = self.mod_channels.get(message.guild.id)
+            if mod_channel:
+                await mod_channel.send(
+                    f"Automated detection: User <@{offender_id}> blocked (Severity 3: Severe Hate). Original message: {message.jump_url}"
+                )
+        # Extremist hate: delete + permanent block + escalate
+        elif severity == 4:
+            await message.delete()
+            self.blocked_users.add(offender_id)
+            self.violation_history[offender_id] = self.violation_history.get(offender_id, 0) + 1
+            mod_channel = self.mod_channels.get(message.guild.id)
+            if mod_channel:
+                await mod_channel.send(
+                    f"Automated detection: User <@{offender_id}> permanently blocked & escalated (Severity 4: Extremist Hate). Original message: {message.jump_url}"
+                )
 
 client = ModBot()
 client.run(discord_token)

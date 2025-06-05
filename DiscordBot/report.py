@@ -39,34 +39,30 @@ class Report:
             self.state = State.REPORT_COMPLETE
             return ["Report cancelled."]
 
-        # Step 1: Category selection
+        # Step 1: Category selection (numeric)
         text = message.content.strip().lower()
         if self.state == State.SELECT_CATEGORY:
-            options = {
-                "imminent danger": "imminent danger",
-                "hate speech": "hate speech",
-                "explicit content": "explicit content"
-            }
+            options = {"1": "imminent danger", "2": "hate speech", "3": "explicit content"}
             if text not in options:
-                return ["Please choose one of: Imminent Danger, Hate Speech, Explicit Content."]
+                return ["Please choose one of:\n1) Imminent Danger\n2) Hate Speech\n3) Explicit Content"]
             self.abuse_type = options[text]
-            if self.abuse_type == "imminent danger":
+            if text == "1":
                 self.state = State.SELECT_DANGER_TYPE
-                return ["Which type of danger?\n• Suicide or Self-Harm\n• Threat of Violence"]
-            elif self.abuse_type == "hate speech":
+                return ["Which type of danger?\n1) Suicide or Self-Harm\n2) Threat of Violence"]
+            elif text == "2":
                 self.state = State.SELECT_HATE_SUBTYPE
-                return ["Which abuse type are you reporting?\n• Racial Slurs\n• Homophobic Language\n• Sexist Language\n• Other hate/harassment"]
+                return ["Which abuse type are you reporting?\n1) Racial Slurs\n2) Homophobic Language\n3) Sexist Language\n4) Other hate/harassment"]
             else:
                 self.state = State.SELECT_EXPLICIT_SUBTYPE
-                return ["Which category best describes the content?\n• Child Sexual Abuse Material\n• Unwanted Sexual Content\n• Sexual Harassment\n• Other explicit content"]
+                return ["Which category best describes the content?\n1) Child Sexual Abuse Material\n2) Unwanted Sexual Content\n3) Sexual Harassment\n4) Other explicit content"]
 
-        # Step 2a: Imminent Danger subtype
+        # Step 2a: Imminent Danger subtype (numeric)
         if self.state == State.SELECT_DANGER_TYPE:
-            valid = ["suicide or self-harm", "threat of violence"]
-            if text not in valid:
-                return ["Please choose one of: Suicide or Self-Harm, Threat of Violence."]
-            self.subtype = text
-            if text == "suicide or self-harm":
+            options = {"1": "suicide or self-harm", "2": "threat of violence"}
+            if text not in options:
+                return ["Please choose one of:\n1) Suicide or Self-Harm\n2) Threat of Violence"]
+            self.subtype = options[text]
+            if text == "1":
                 self.state = State.AWAITING_DANGER_ACK
                 return [
                     "If you or someone you know is struggling, please reach out:\n"
@@ -85,41 +81,42 @@ class Report:
             self.state = State.AWAITING_CONTEXT
             return ["Thank you! Would you like to add any comments or attach a screenshot? Type 'skip' to skip."]
 
-        # Step 2c: Hate Speech subtype
+        # Step 2c: Hate Speech subtype (numeric)
         if self.state == State.SELECT_HATE_SUBTYPE:
-            valid = ["racial slurs", "homophobic language", "sexist language", "other hate/harassment"]
-            if text not in valid:
-                return ["Please choose one of: Racial Slurs, Homophobic Language, Sexist Language, Other hate/harassment."]
-            self.subtype = text
+            options = {"1": "racial slurs", "2": "homophobic language", "3": "sexist language", "4": "other hate/harassment"}
+            if text not in options:
+                return ["Please choose one of:\n1) Racial Slurs\n2) Homophobic Language\n3) Sexist Language\n4) Other hate/harassment"]
+            self.subtype = options[text]
             self.state = State.SELECT_HATE_FILTER
-            return ["Want to take further steps to prevent seeing this type of content? (Yes/No)"]
+            return ["Want to take further steps to prevent seeing this type of content?\n1) Yes\n2) No"]
 
-        # Step 2d: Hate Speech filter opt-in
+        # Step 2d: Hate Speech filter opt-in (numeric)
         if self.state == State.SELECT_HATE_FILTER:
-            if text not in ["yes", "no"]:
-                return ["Please answer 'Yes' or 'No'."]
-            self.filter_opt_in = (text == "yes")
+            options = {"1": True, "2": False}
+            if text not in options:
+                return ["Please answer:\n1) Yes\n2) No"]
+            self.filter_opt_in = options[text]
+            self.state = State.AWAITING_CONTEXT
             if self.filter_opt_in:
-                self.state = State.AWAITING_CONTEXT
-                return ["Would you like to filter out messages containing this content? (Yes/No)"]
+                return ["Would you like to filter out messages containing this content?\n1) Yes\n2) No"]
             else:
-                self.state = State.AWAITING_CONTEXT
                 return ["Thank you! Would you like to add any comments or attach a screenshot? Type 'skip' to skip."]
 
-        # Step 2e: Explicit Content subtype
+        # Step 2e: Explicit Content subtype (numeric)
         if self.state == State.SELECT_EXPLICIT_SUBTYPE:
-            valid = ["child sexual abuse material", "unwanted sexual content", "sexual harassment", "other explicit content"]
-            if text not in valid:
-                return ["Please choose one of: Child Sexual Abuse Material, Unwanted Sexual Content, Sexual Harassment, Other explicit content."]
-            self.subtype = text
+            options = {"1": "child sexual abuse material", "2": "unwanted sexual content", "3": "sexual harassment", "4": "other explicit content"}
+            if text not in options:
+                return ["Please choose one of:\n1) Child Sexual Abuse Material\n2) Unwanted Sexual Content\n3) Sexual Harassment\n4) Other explicit content"]
+            self.subtype = options[text]
             self.state = State.SELECT_EXPLICIT_BLOCK
-            return ["Would you like to block this account from contacting you? (Yes/No)"]
+            return ["Would you like to block this account from contacting you?\n1) Yes\n2) No"]
 
-        # Step 2f: Explicit Content block opt-in
+        # Step 2f: Explicit Content block opt-in (numeric)
         if self.state == State.SELECT_EXPLICIT_BLOCK:
-            if text not in ["yes", "no"]:
-                return ["Please answer 'Yes' or 'No'."]
-            self.block_opt_in = (text == "yes")
+            options = {"1": True, "2": False}
+            if text not in options:
+                return ["Please answer:\n1) Yes\n2) No"]
+            self.block_opt_in = options[text]
             self.state = State.AWAITING_CONTEXT
             return ["Thank you! Would you like to add any comments? Type 'skip' to skip."]
 
@@ -149,7 +146,9 @@ class Report:
         # Assign unique report ID
         report_id = self.client.next_report_id
         self.client.next_report_id += 1
-        # Store metadata
+        # Compute automated severity for reported message
+        severity = self.client.eval_text(self.reported_message.content)
+        # Store metadata including severity
         self.client.report_store[report_id] = {
             'report_id': report_id,
             'reporter_id': self.reporter.id,
@@ -163,6 +162,7 @@ class Report:
             'channel_id': self.reported_message.channel.id,
             'message_id': self.reported_message.id,
             'context': self.context,
+            'severity': severity,
             'status': 'pending'
         }
         # Build embed
@@ -170,6 +170,8 @@ class Report:
         embed.set_footer(text=f"Report ID: {report_id}")
         embed.add_field(name="Reporter", value=self.reporter.mention, inline=True)
         embed.add_field(name="Category", value=self.abuse_type, inline=True)
+        # Include automated severity level
+        embed.add_field(name="Severity", value=f"{severity} ({self.client.severity_labels.get(severity)})", inline=True)
         if self.subtype:
             embed.add_field(name="Subtype", value=self.subtype, inline=True)
         if hasattr(self, 'filter_opt_in'):
