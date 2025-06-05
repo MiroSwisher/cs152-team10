@@ -8,7 +8,7 @@ import re
 import requests
 from report import Report
 import pdb
-from classifier import load_model, predict_severity, combined_classification
+from classifier import load_model, predict_severity
 
 # Set up logging to the console
 logger = logging.getLogger('discord')
@@ -62,7 +62,7 @@ class ModBot(discord.Client):
         print('Press Ctrl-C to quit.')
 
         # Parse the group number out of the bot's name
-        match = re.search(r'[gG]roup (\d+) [bB]ot', self.user.name)
+        match = re.search('[gG]roup (\d+) [bB]ot', self.user.name)
         if match:
             self.group_num = match.group(1)
         else:
@@ -145,10 +145,9 @@ class ModBot(discord.Client):
 
     def eval_text(self, message):
         """
-        Run the combined hate speech classifier and return a severity level (0-4).
+        Run the hate speech classifier and return a severity level (0-4).
         """
-        result = combined_classification(message)
-        return result['severity']
+        return predict_severity(message, self.vectorizer, self.classifier)
 
     def code_format(self, text):
         """

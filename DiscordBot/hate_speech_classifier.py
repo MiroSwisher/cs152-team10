@@ -58,12 +58,29 @@ class HateSpeechClassifier:
                 "confidence": 0.0-1.0
             }}
 
-            Severity levels:
+            Severity levels and examples:
             0: Non-Hateful - No hate speech detected
-            1: Mild Hate - Contains animosity or mild hostility
-            2: Moderate Hate - Contains derogation or dehumanization
+               Examples: "I disagree with you", "I don't like that", "This is bad"
+            
+            1: Mild Hate - Contains animosity or mild hostility directed at a person or group
+               Examples: "I hate people like you", "Your kind is annoying", "You're all idiots"
+               NOT: "I hate this weather", "I hate when that happens"
+            
+            2: Moderate Hate - Contains derogation or dehumanization of a person or group
+               Examples: "You're subhuman", "Your people are inferior", "You don't deserve rights"
+            
             3: Severe Hate - Contains threats or severe hostility
+               Examples: "You should be eliminated", "I hope you die", "We should remove all of you"
+            
             4: Extremist Hate - Expresses support for hate or extremist views
+               Examples: "We need to exterminate them all", "Death to all of them", "They should be wiped out"
+
+            Important guidelines:
+            - The word "hate" alone is not enough to classify as hate speech
+            - Disagreement or criticism is not hate speech
+            - The message must target a person or group
+            - Consider the full context and intent of the message
+            - When in doubt, classify as 0 (Non-Hateful)
 
             Message to analyze: {message}
             """
@@ -71,12 +88,29 @@ class HateSpeechClassifier:
             prompt = f"""Analyze the following message and determine if it contains hate speech.
             Return ONLY a single number (0-4) representing the severity level, with no additional text or explanation.
 
-            Severity levels:
+            Severity levels and examples:
             0: Non-Hateful - No hate speech detected
-            1: Mild Hate - Contains animosity or mild hostility
-            2: Moderate Hate - Contains derogation or dehumanization
+               Examples: "I disagree with you", "I don't like that", "This is bad"
+            
+            1: Mild Hate - Contains animosity or mild hostility directed at a person or group
+               Examples: "I hate people like you", "Your kind is annoying", "You're all idiots"
+               NOT: "I hate this weather", "I hate when that happens"
+            
+            2: Moderate Hate - Contains derogation or dehumanization of a person or group
+               Examples: "You're subhuman", "Your people are inferior", "You don't deserve rights"
+            
             3: Severe Hate - Contains threats or severe hostility
+               Examples: "You should be eliminated", "I hope you die", "We should remove all of you"
+            
             4: Extremist Hate - Expresses support for hate or extremist views
+               Examples: "We need to exterminate them all", "Death to all of them", "They should be wiped out"
+
+            Important guidelines:
+            - The word "hate" alone is not enough to classify as hate speech
+            - Disagreement or criticism is not hate speech
+            - The message must target a person or group
+            - Consider the full context and intent of the message
+            - When in doubt, classify as 0 (Non-Hateful)
 
             Message to analyze: {message}
             """
@@ -113,7 +147,15 @@ def main():
             "You're all worthless and should be eliminated",
             "Let's work together to make things better",
             "I don't like your kind around here",
-            "We should remove all of them from our society"
+            "We should remove all of them from our society",
+            "I hate this weather",
+            "I hate when that happens",
+            "I disagree with your opinion",
+            "This is a bad idea",
+            "You're an idiot",
+            "Your people are inferior",
+            "I hope you die",
+            "Death to all of them"
         ]
 
         for message in test_messages:

@@ -118,8 +118,35 @@ def combined_classification(text: str, verbose: bool = False) -> dict:
     
     llm_severity = vertex_result.get('severity', 0)
     
-    # Make final decision - use the higher severity between the two classifiers
-    final_severity = max(traditional_severity, llm_severity)
+    # New combination strategy:
+    # 1. If both classifiers agree on non-hate (0), keep it as 0
+    # 2. If both classifiers agree on severity, use that severity
+    # 3. If classifiers disagree:
+    #    - If difference is 1 level, use the higher severity
+    #    - If difference is 2+ levels, use the traditional classifier's severity
+    #    - If traditional is 0 and LLM is >0, use LLM's severity
+    #    - If LLM is 0 and traditional is >0, use traditional's severity
+    
+    if traditional_severity == llm_severity:
+        final_severity = traditional_severity
+    else:
+        severity_diff = abs(traditional_severity - llm_severity)
+        
+        if severity_diff == 1:
+            # Small difference: use higher severity
+            final_severity = max(traditional_severity, llm_severity)
+        elif severity_diff >= 2:
+            # Large difference: prefer traditional classifier
+            final_severity = traditional_severity
+        elif traditional_severity == 0:
+            # Traditional says non-hate, LLM says hate
+            final_severity = llm_severity
+        elif llm_severity == 0:
+            # LLM says non-hate, traditional says hate
+            final_severity = traditional_severity
+        else:
+            # Fallback: use traditional classifier
+            final_severity = traditional_severity
     
     result = {
         'severity': final_severity,
@@ -129,10 +156,16 @@ def combined_classification(text: str, verbose: bool = False) -> dict:
     }
     
     if verbose and 'confidence' in vertex_result:
-        # Combine confidences - higher severity increases confidence
-        severity_confidence = min(final_severity / 4.0, 1.0)  # Normalize severity to 0-1
-        vertex_confidence = vertex_result.get('confidence', 0.5)
-        result['combined_confidence'] = max(severity_confidence, vertex_confidence)
+        # Calculate combined confidence based on agreement
+        if traditional_severity == llm_severity:
+            # Full agreement: higher confidence
+            result['combined_confidence'] = 0.9
+        elif severity_diff == 1:
+            # Small difference: moderate confidence
+            result['combined_confidence'] = 0.7
+        else:
+            # Large difference: lower confidence
+            result['combined_confidence'] = 0.5
     
     return result
 
