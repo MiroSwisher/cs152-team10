@@ -8,7 +8,7 @@ import re
 import requests
 from report import Report
 import pdb
-from classifier import load_model, predict_severity
+from single_classifier import load_model, predict_severity
 
 # Set up logging to the console
 logger = logging.getLogger('discord')

@@ -10,6 +10,7 @@ import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from hate_speech_classifier import HateSpeechClassifier
+import logging
 
 # Paths
 BASE_DIR = os.path.dirname(__file__)
@@ -18,35 +19,27 @@ VECTORIZER_PATH = os.path.join(BASE_DIR, 'vectorizer.pkl')
 MODEL_PATH = os.path.join(BASE_DIR, 'model.pkl')
 METRICS_PATH = os.path.join(BASE_DIR, 'metrics.json')
 
+# Configure logger
+logger = logging.getLogger(__name__)
 
-def severity_mapping(label, type_str):
-    # Map dataset label and type to severity levels
-    if label != 'hate':
-        return 0
-    if type_str == 'animosity':
-        return 1
-    elif type_str in ['derogation', 'dehumanization']:
-        return 2
-    elif type_str == 'threatening':
-        return 3
-    elif type_str == 'support':
-        return 4
-    else:
-        return 1
+
+def binary_mapping(label, type_str):
+    # Map dataset label to binary classification (0: non-hate, 1: hate)
+    return 1 if label == 'hate' else 0
 
 
 def train_and_save():
     # Read dataset including split
     df = pd.read_csv(DATASET_PATH, usecols=['text', 'label', 'type', 'split'])
-    # Map severity
-    df['severity'] = df.apply(lambda row: severity_mapping(row['label'], row['type']), axis=1)
+    # Map to binary
+    df['is_hate'] = df.apply(lambda row: binary_mapping(row['label'], row['type']), axis=1)
     # Use provided splits: train for training, test for evaluation
     df_train = df[df['split'] == 'train']
     df_test = df[df['split'] == 'test']
     X_train = df_train['text'].astype(str)
-    y_train = df_train['severity']
+    y_train = df_train['is_hate']
     X_test = df_test['text'].astype(str)
-    y_test = df_test['severity']
+    y_test = df_test['is_hate']
     # Train vectorizer and classifier
     vectorizer = TfidfVectorizer(max_features=10000, ngram_range=(1,2), stop_words='english')
     X_train_vec = vectorizer.fit_transform(X_train)
@@ -80,16 +73,15 @@ def load_model():
     return vectorizer, clf
 
 
-def predict_severity(text, vectorizer, clf):
-    # Predict severity for a single text input
+def predict_hate_speech(text, vectorizer, clf):
+    # Predict if text contains hate speech (binary)
     vec = vectorizer.transform([text])
     return int(clf.predict(vec)[0])
 
 
 def combined_classification(text: str, verbose: bool = False) -> dict:
     """
-    Combines predictions from both the traditional ML classifier and the Vertex AI classifier
-    to make a final decision about hate speech classification.
+    Combines predictions from both traditional ML and LLM classifiers.
     
     Args:
         text (str): The message to classify
@@ -97,77 +89,81 @@ def combined_classification(text: str, verbose: bool = False) -> dict:
         
     Returns:
         dict: Combined classification result containing:
-            - severity (int): Final severity level (0-4)
             - is_hate_speech (bool): Whether the message is classified as hate speech
-            - traditional_severity (int): Severity from traditional classifier
-            - llm_severity (int): Severity from LLM classifier
+            - traditional_prediction (bool): Prediction from traditional classifier
+            - llm_prediction (bool): Prediction from LLM classifier
+            - confidence (str): 'high' if both classifiers agree, 'medium' if they disagree
             - combined_confidence (float): Combined confidence score (only in verbose mode)
     """
-    # Get prediction from traditional classifier
+    # Get traditional ML prediction
     vectorizer, clf = load_model()
-    traditional_severity = predict_severity(text, vectorizer, clf)
+    trad_pred = bool(predict_hate_speech(text, vectorizer, clf))
     
-    # Get prediction from Vertex AI classifier
+    # Get LLM prediction with verbose output if requested
     vertex_classifier = HateSpeechClassifier()
     vertex_result = vertex_classifier.classify_message(text, verbose=verbose)
     
+    # Log the raw response for debugging
+    logger.info(f"Raw LLM response: {vertex_result}")
+    
     # Parse Vertex AI result
-    if isinstance(vertex_result, str):
-        import json
-        vertex_result = json.loads(vertex_result)
-    
-    llm_severity = vertex_result.get('severity', 0)
-    
-    # New combination strategy:
-    # 1. If both classifiers agree on non-hate (0), keep it as 0
-    # 2. If both classifiers agree on severity, use that severity
-    # 3. If classifiers disagree:
-    #    - If difference is 1 level, use the higher severity
-    #    - If difference is 2+ levels, use the traditional classifier's severity
-    #    - If traditional is 0 and LLM is >0, use LLM's severity
-    #    - If LLM is 0 and traditional is >0, use traditional's severity
-    
-    if traditional_severity == llm_severity:
-        final_severity = traditional_severity
-    else:
-        severity_diff = abs(traditional_severity - llm_severity)
+    try:
+        if isinstance(vertex_result, str):
+            import json
+            # Clean the response - remove markdown code block syntax
+            cleaned_response = vertex_result.strip()
+            if cleaned_response.startswith('```'):
+                # Remove the opening ```json or ``` and closing ```
+                cleaned_response = cleaned_response.split('\n', 1)[1]  # Remove first line
+                cleaned_response = cleaned_response.rsplit('\n', 1)[0]  # Remove last line
+                cleaned_response = cleaned_response.strip()
+            
+            logger.info(f"Attempting to parse JSON: {cleaned_response}")
+            vertex_result = json.loads(cleaned_response)
         
-        if severity_diff == 1:
-            # Small difference: use higher severity
-            final_severity = max(traditional_severity, llm_severity)
-        elif severity_diff >= 2:
-            # Large difference: prefer traditional classifier
-            final_severity = traditional_severity
-        elif traditional_severity == 0:
-            # Traditional says non-hate, LLM says hate
-            final_severity = llm_severity
-        elif llm_severity == 0:
-            # LLM says non-hate, traditional says hate
-            final_severity = traditional_severity
-        else:
-            # Fallback: use traditional classifier
-            final_severity = traditional_severity
-    
-    result = {
-        'severity': final_severity,
-        'is_hate_speech': final_severity > 0,
-        'traditional_severity': traditional_severity,
-        'llm_severity': llm_severity
-    }
-    
-    if verbose and 'confidence' in vertex_result:
-        # Calculate combined confidence based on agreement
-        if traditional_severity == llm_severity:
-            # Full agreement: higher confidence
-            result['combined_confidence'] = 0.9
-        elif severity_diff == 1:
-            # Small difference: moderate confidence
-            result['combined_confidence'] = 0.7
-        else:
-            # Large difference: lower confidence
-            result['combined_confidence'] = 0.5
-    
-    return result
+        # Get severity from result
+        llm_severity = vertex_result.get('severity', 0)
+        llm_pred = bool(llm_severity > 0)
+        
+        # Smart combination strategy:
+        # 1. If both classifiers agree, use their prediction
+        # 2. If they disagree, prefer the LLM prediction since it has better accuracy
+        # 3. For edge cases (very short messages or specific patterns), use traditional ML
+        is_hate_speech = llm_pred if trad_pred != llm_pred else trad_pred
+        
+        # Edge case handling
+        if len(text.split()) <= 2:  # Very short messages
+            is_hate_speech = trad_pred  # Traditional ML often better with short texts
+        
+        result = {
+            'traditional_prediction': trad_pred,
+            'llm_prediction': llm_pred,
+            'is_hate_speech': is_hate_speech,
+            'confidence': 'high' if trad_pred == llm_pred else 'medium'
+        }
+        
+        if verbose:
+            # Calculate combined confidence based on agreement and LLM confidence
+            if trad_pred == llm_pred:
+                # Full agreement: higher confidence
+                result['combined_confidence'] = 0.9
+            else:
+                # Use LLM confidence if available, otherwise default to medium
+                llm_confidence = vertex_result.get('confidence', 0.5)
+                result['combined_confidence'] = llm_confidence
+        
+        return result
+        
+    except Exception as e:
+        # If there's any error in parsing or processing, fall back to traditional ML
+        logger.error(f"Error in combined classification: {str(e)}")
+        logger.error(f"Raw response was: {vertex_result}")
+        return {
+            'traditional_prediction': trad_pred,
+            'llm_prediction': False,
+            'is_hate_speech': trad_pred,
+            'confidence': 'low'
+        }
 
 
 def llm_classification(text: str) -> bool:
@@ -188,4 +184,6 @@ def llm_classification(text: str) -> bool:
         import json
         result = json.loads(result)
     
-    return result.get('is_hate_speech', False) 
+    # Convert severity to binary
+    severity = result.get('severity', 0)
+    return bool(severity > 0) 
