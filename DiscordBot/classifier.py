@@ -9,6 +9,7 @@ import pandas as pd
 import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
+from hate_speech_classifier import HateSpeechClassifier
 
 # Paths
 BASE_DIR = os.path.dirname(__file__)
@@ -82,4 +83,76 @@ def load_model():
 def predict_severity(text, vectorizer, clf):
     # Predict severity for a single text input
     vec = vectorizer.transform([text])
-    return int(clf.predict(vec)[0]) 
+    return int(clf.predict(vec)[0])
+
+
+def combined_classification(text: str, verbose: bool = False) -> dict:
+    """
+    Combines predictions from both the traditional ML classifier and the Vertex AI classifier
+    to make a final decision about hate speech classification.
+    
+    Args:
+        text (str): The message to classify
+        verbose (bool): Whether to return detailed output with confidence scores
+        
+    Returns:
+        dict: Combined classification result containing:
+            - severity (int): Final severity level (0-4)
+            - is_hate_speech (bool): Whether the message is classified as hate speech
+            - traditional_severity (int): Severity from traditional classifier
+            - llm_severity (int): Severity from LLM classifier
+            - combined_confidence (float): Combined confidence score (only in verbose mode)
+    """
+    # Get prediction from traditional classifier
+    vectorizer, clf = load_model()
+    traditional_severity = predict_severity(text, vectorizer, clf)
+    
+    # Get prediction from Vertex AI classifier
+    vertex_classifier = HateSpeechClassifier()
+    vertex_result = vertex_classifier.classify_message(text, verbose=verbose)
+    
+    # Parse Vertex AI result
+    if isinstance(vertex_result, str):
+        import json
+        vertex_result = json.loads(vertex_result)
+    
+    llm_severity = vertex_result.get('severity', 0)
+    
+    # Make final decision - use the higher severity between the two classifiers
+    final_severity = max(traditional_severity, llm_severity)
+    
+    result = {
+        'severity': final_severity,
+        'is_hate_speech': final_severity > 0,
+        'traditional_severity': traditional_severity,
+        'llm_severity': llm_severity
+    }
+    
+    if verbose and 'confidence' in vertex_result:
+        # Combine confidences - higher severity increases confidence
+        severity_confidence = min(final_severity / 4.0, 1.0)  # Normalize severity to 0-1
+        vertex_confidence = vertex_result.get('confidence', 0.5)
+        result['combined_confidence'] = max(severity_confidence, vertex_confidence)
+    
+    return result
+
+
+def llm_classification(text: str) -> bool:
+    """
+    Uses only the Vertex AI (LLM) classifier to determine if a message contains hate speech.
+    
+    Args:
+        text (str): The message to classify
+        
+    Returns:
+        bool: True if the message is classified as hate speech, False otherwise
+    """
+    vertex_classifier = HateSpeechClassifier()
+    result = vertex_classifier.classify_message(text)
+    
+    # Parse the result string into a dictionary
+    if isinstance(result, str):
+        import json
+        result = json.loads(result)
+    
+    return result.get('is_hate_speech', False) 

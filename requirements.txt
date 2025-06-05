@@ -3,3 +3,4 @@ vertexai>=0.0.1
 python-dotenv
 pandas
 scikit-learn
+keyboard
