@@ -11,6 +11,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from hate_speech_classifier import HateSpeechClassifier
 import logging
+import vertexai
+from vertexai.preview.generative_models import GenerativeModel
 
 # Paths
 BASE_DIR = os.path.dirname(__file__)
@@ -186,4 +188,70 @@ def llm_classification(text: str) -> bool:
     
     # Convert severity to binary
     severity = result.get('severity', 0)
-    return bool(severity > 0) 
+    return bool(severity > 0)
+
+
+def tuned_llm_classification(text: str, endpoint_id: str, project_id: str, location: str = "us-central1") -> dict:
+    """
+    Uses a tuned Vertex AI model endpoint to classify text for hate speech.
+    
+    Args:
+        text (str): The message to classify
+        endpoint_id (str): The ID of the tuned model endpoint
+        project_id (str): Google Cloud project ID
+        location (str): Location of the endpoint (default: "us-central1")
+        
+    Returns:
+        dict: Classification result containing:
+            - is_hate_speech (bool): Whether the message is classified as hate speech
+            - severity (int): Severity level (0-4)
+            - explanation (str): Explanation of the classification
+    """
+    try:
+        # Initialize Vertex AI
+        vertexai.init(project=project_id, location=location)
+        
+        # Get the model from the endpoint
+        model = GenerativeModel.from_tuned_model(endpoint_id)
+        
+        # Create the prompt
+        prompt = f"Analyze this text for hate speech: {text}"
+        
+        # Get response from the model
+        response = model.generate_content(prompt)
+        
+        # Parse the response
+        try:
+            result = json.loads(response.text)
+        except json.JSONDecodeError:
+            # If response is not valid JSON, try to extract JSON from text
+            import re
+            json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                raise ValueError(f"Could not parse response as JSON: {response.text}")
+        
+        # Ensure the result has the expected format
+        if not isinstance(result, dict):
+            raise ValueError(f"Expected dictionary response, got: {type(result)}")
+        
+        # Extract required fields with defaults
+        is_hate_speech = result.get('is_hate_speech', False)
+        severity = result.get('severity', 0)
+        explanation = result.get('explanation', 'No explanation provided')
+        
+        return {
+            'is_hate_speech': bool(is_hate_speech),
+            'severity': int(severity),
+            'explanation': str(explanation)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in tuned model classification: {str(e)}")
+        # Return a safe default response
+        return {
+            'is_hate_speech': False,
+            'severity': 0,
+            'explanation': f"Error in classification: {str(e)}"
+        } 
