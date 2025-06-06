@@ -191,7 +191,6 @@ Return ONLY a single number (0-4) representing the severity level, with no addit
                     llm_severity = 0
                 else:
                     # Try to extract a number from the response
-                    import re
                     numbers = re.findall(r'\d+', response_text)
                     if numbers:
                         llm_severity = int(numbers[0])
