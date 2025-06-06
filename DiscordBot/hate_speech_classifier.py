@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Dict, Any
 from google.cloud import aiplatform
-from vertexai.preview.language_models import TextGenerationModel
+from vertexai.preview.generative_models import GenerativeModel
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,31 +13,24 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class HateSpeechClassifier:
-    def __init__(self, project_id=None, location='us-central1'):
-        """Initialize the classifier with either a fine-tuned or base model."""
+    def __init__(self, project_id=None, location='us-west1'):
+        """Initialize the classifier with the endpoint model."""
         self.project_id = project_id or os.getenv('GOOGLE_CLOUD_PROJECT')
         self.location = location
+        self.endpoint_id = os.getenv('VERTEX_ENDPOINT_ID')
         self.model = self.load_model()
         
     def load_model(self):
-        """Load either the fine-tuned model or fall back to the base model."""
+        """Load the model from the endpoint."""
         try:
             # Initialize Vertex AI
             aiplatform.init(project=self.project_id, location=self.location)
             
-            # Try to load fine-tuned model info
-            fine_tuned_model_path = os.path.join(os.path.dirname(__file__), 'fine_tuned_model.json')
-            if os.path.exists(fine_tuned_model_path):
-                with open(fine_tuned_model_path, 'r') as f:
-                    model_info = json.load(f)
-                logger.info(f"Loading fine-tuned model: {model_info['model_name']}")
-                return TextGenerationModel.from_pretrained(
-                    "text-bison@001",
-                    fine_tuned_model_name=model_info['model_name']
-                )
-            else:
-                logger.info("No fine-tuned model found, using base model")
-                return TextGenerationModel.from_pretrained("text-bison@001")
+            if not self.endpoint_id:
+                raise ValueError("VERTEX_ENDPOINT_ID environment variable not set")
+            
+            logger.info(f"Loading model from endpoint: {self.endpoint_id}")
+            return GenerativeModel.from_tuned_model(self.endpoint_id)
                 
         except Exception as e:
             logger.error(f"Error loading model: {str(e)}")
@@ -73,11 +66,7 @@ class HateSpeechClassifier:
             """
             
             # Get prediction from model
-            response = self.model.predict(
-                prompt,
-                temperature=0.1,  # Lower temperature for more consistent outputs
-                max_output_tokens=128
-            )
+            response = self.model.generate_content(prompt)
             
             # Parse the response
             try:

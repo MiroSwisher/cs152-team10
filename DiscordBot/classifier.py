@@ -9,7 +9,6 @@ import pandas as pd
 import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from hate_speech_classifier import HateSpeechClassifier
 import logging
 import vertexai
 from vertexai.preview.generative_models import GenerativeModel
@@ -81,6 +80,57 @@ def predict_hate_speech(text, vectorizer, clf):
     return int(clf.predict(vec)[0])
 
 
+def llm_classification(text: str) -> bool:
+    """
+    Uses the Vertex AI model to classify text for hate speech.
+    
+    Args:
+        text (str): The message to classify
+        
+    Returns:
+        bool: True if the message is classified as hate speech, False otherwise
+    """
+    try:
+        # Initialize Vertex AI
+        project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+        location = os.getenv('VERTEX_LOCATION', 'us-west1')
+        endpoint_id = os.getenv('VERTEX_ENDPOINT_ID')
+        
+        if not all([project_id, endpoint_id]):
+            raise ValueError("Missing required environment variables: GOOGLE_CLOUD_PROJECT or VERTEX_ENDPOINT_ID")
+            
+        vertexai.init(project=project_id, location=location)
+        
+        # Get the model from the endpoint
+        model = GenerativeModel.from_tuned_model(endpoint_id)
+        
+        # Create the prompt
+        prompt = f"Analyze this text for hate speech: {text}"
+        
+        # Get response from the model
+        response = model.generate_content(prompt)
+        
+        # Parse the response
+        try:
+            result = json.loads(response.text)
+        except json.JSONDecodeError:
+            # If response is not valid JSON, try to extract JSON from text
+            import re
+            json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                raise ValueError(f"Could not parse response as JSON: {response.text}")
+        
+        # Convert severity to binary
+        severity = result.get('severity', 0)
+        return bool(severity > 0)
+        
+    except Exception as e:
+        logger.error(f"Error in LLM classification: {str(e)}")
+        return False
+
+
 def combined_classification(text: str, verbose: bool = False) -> dict:
     """
     Combines predictions from both traditional ML and LLM classifiers.
@@ -101,97 +151,34 @@ def combined_classification(text: str, verbose: bool = False) -> dict:
     vectorizer, clf = load_model()
     trad_pred = bool(predict_hate_speech(text, vectorizer, clf))
     
-    # Get LLM prediction with verbose output if requested
-    vertex_classifier = HateSpeechClassifier()
-    vertex_result = vertex_classifier.classify_message(text, verbose=verbose)
+    # Get LLM prediction
+    llm_pred = llm_classification(text)
     
-    # Log the raw response for debugging
-    logger.info(f"Raw LLM response: {vertex_result}")
+    # Smart combination strategy:
+    # 1. If both classifiers agree, use their prediction
+    # 2. If they disagree, prefer the LLM prediction since it has better accuracy
+    # 3. For edge cases (very short messages or specific patterns), use traditional ML
+    is_hate_speech = llm_pred if trad_pred != llm_pred else trad_pred
     
-    # Parse Vertex AI result
-    try:
-        if isinstance(vertex_result, str):
-            import json
-            # Clean the response - remove markdown code block syntax
-            cleaned_response = vertex_result.strip()
-            if cleaned_response.startswith('```'):
-                # Remove the opening ```json or ``` and closing ```
-                cleaned_response = cleaned_response.split('\n', 1)[1]  # Remove first line
-                cleaned_response = cleaned_response.rsplit('\n', 1)[0]  # Remove last line
-                cleaned_response = cleaned_response.strip()
-            
-            logger.info(f"Attempting to parse JSON: {cleaned_response}")
-            vertex_result = json.loads(cleaned_response)
-        
-        # Get severity from result
-        llm_severity = vertex_result.get('severity', 0)
-        llm_pred = bool(llm_severity > 0)
-        
-        # Smart combination strategy:
-        # 1. If both classifiers agree, use their prediction
-        # 2. If they disagree, prefer the LLM prediction since it has better accuracy
-        # 3. For edge cases (very short messages or specific patterns), use traditional ML
-        is_hate_speech = llm_pred if trad_pred != llm_pred else trad_pred
-        
-        # Edge case handling
-        if len(text.split()) <= 2:  # Very short messages
-            is_hate_speech = trad_pred  # Traditional ML often better with short texts
-        
-        result = {
-            'traditional_prediction': trad_pred,
-            'llm_prediction': llm_pred,
-            'is_hate_speech': is_hate_speech,
-            'confidence': 'high' if trad_pred == llm_pred else 'medium'
-        }
-        
-        if verbose:
-            # Calculate combined confidence based on agreement and LLM confidence
-            if trad_pred == llm_pred:
-                # Full agreement: higher confidence
-                result['combined_confidence'] = 0.9
-            else:
-                # Use LLM confidence if available, otherwise default to medium
-                llm_confidence = vertex_result.get('confidence', 0.5)
-                result['combined_confidence'] = llm_confidence
-        
-        return result
-        
-    except Exception as e:
-        # If there's any error in parsing or processing, fall back to traditional ML
-        logger.error(f"Error in combined classification: {str(e)}")
-        logger.error(f"Raw response was: {vertex_result}")
-        return {
-            'traditional_prediction': trad_pred,
-            'llm_prediction': False,
-            'is_hate_speech': trad_pred,
-            'confidence': 'low'
-        }
+    # Edge case handling
+    if len(text.split()) <= 2:  # Very short messages
+        is_hate_speech = trad_pred  # Traditional ML often better with short texts
+    
+    result = {
+        'traditional_prediction': trad_pred,
+        'llm_prediction': llm_pred,
+        'is_hate_speech': is_hate_speech,
+        'confidence': 'high' if trad_pred == llm_pred else 'medium'
+    }
+    
+    if verbose:
+        # Calculate combined confidence based on agreement
+        result['combined_confidence'] = 0.9 if trad_pred == llm_pred else 0.5
+    
+    return result
 
 
-def llm_classification(text: str) -> bool:
-    """
-    Uses only the Vertex AI (LLM) classifier to determine if a message contains hate speech.
-    
-    Args:
-        text (str): The message to classify
-        
-    Returns:
-        bool: True if the message is classified as hate speech, False otherwise
-    """
-    vertex_classifier = HateSpeechClassifier()
-    result = vertex_classifier.classify_message(text)
-    
-    # Parse the result string into a dictionary
-    if isinstance(result, str):
-        import json
-        result = json.loads(result)
-    
-    # Convert severity to binary
-    severity = result.get('severity', 0)
-    return bool(severity > 0)
-
-
-def tuned_llm_classification(text: str, endpoint_id: str, project_id: str, location: str = "us-central1") -> dict:
+def tuned_llm_classification(text: str, endpoint_id: str, project_id: str, location: str = "us-west1") -> dict:
     """
     Uses a tuned Vertex AI model endpoint to classify text for hate speech.
     
@@ -199,7 +186,7 @@ def tuned_llm_classification(text: str, endpoint_id: str, project_id: str, locat
         text (str): The message to classify
         endpoint_id (str): The ID of the tuned model endpoint
         project_id (str): Google Cloud project ID
-        location (str): Location of the endpoint (default: "us-central1")
+        location (str): Location of the endpoint (default: "us-west1")
         
     Returns:
         dict: Classification result containing:
@@ -249,7 +236,6 @@ def tuned_llm_classification(text: str, endpoint_id: str, project_id: str, locat
         
     except Exception as e:
         logger.error(f"Error in tuned model classification: {str(e)}")
-        # Return a safe default response
         return {
             'is_hate_speech': False,
             'severity': 0,

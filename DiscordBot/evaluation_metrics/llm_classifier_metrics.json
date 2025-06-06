@@ -1,0 +1,46 @@
+{
+  "classifier_name": "LLM Classifier",
+  "classification_report": {
+    "0": {
+      "precision": 0.4495145631067961,
+      "recall": 1.0,
+      "f1-score": 0.6202277294038848,
+      "support": 1852.0
+    },
+    "1": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 2268.0
+    },
+    "accuracy": 0.4495145631067961,
+    "macro avg": {
+      "precision": 0.22475728155339805,
+      "recall": 0.5,
+      "f1-score": 0.3101138647019424,
+      "support": 4120.0
+    },
+    "weighted avg": {
+      "precision": 0.20206334244509377,
+      "recall": 0.4495145631067961,
+      "f1-score": 0.27880139680970745,
+      "support": 4120.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      1852,
+      0
+    ],
+    [
+      2268,
+      0
+    ]
+  ],
+  "accuracy": 0.4495145631067961,
+  "average_confidence": 0.4495145631067961,
+  "total_examples": 4120,
+  "correct_predictions": 1852,
+  "error_rate": 0.550485436893204,
+  "errors": []
+}
