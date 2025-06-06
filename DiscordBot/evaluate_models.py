@@ -70,7 +70,12 @@ def evaluate_classifier(classifier_func, test_df, classifier_name, endpoint_id=N
                 pred = result['is_hate_speech']
             else:
                 # For non-tuned models, use the base classifier
-                pred = classifier_func(text)
+                result = classifier_func(text)
+                # Handle both dictionary and boolean results
+                if isinstance(result, dict):
+                    pred = result['is_hate_speech']
+                else:
+                    pred = result
             
             predictions.append(int(pred))
             true_labels.append(true_label)

@@ -12,6 +12,8 @@ from sklearn.linear_model import LogisticRegression
 import logging
 import vertexai
 from vertexai.preview.generative_models import GenerativeModel
+from hate_speech_classifier import HateSpeechClassifier
+
 
 # Paths
 BASE_DIR = os.path.dirname(__file__)
@@ -80,55 +82,33 @@ def predict_hate_speech(text, vectorizer, clf):
     return int(clf.predict(vec)[0])
 
 
-def llm_classification(text: str) -> bool:
+def llm_classification(text: str) -> dict:
     """
-    Uses the Vertex AI model to classify text for hate speech.
+    Uses only the Vertex AI (LLM) classifier to determine if a message contains hate speech.
     
     Args:
         text (str): The message to classify
         
     Returns:
-        bool: True if the message is classified as hate speech, False otherwise
+        dict: Classification result containing:
+            - severity (int): Severity level (0-4):
+                0: Non-Hateful
+                1: Mild Hate (animosity)
+                2: Moderate Hate (derogation, dehumanization)
+                3: Severe Hate (threatening)
+                4: Extremist Hate (support for hate)
+            - is_hate_speech (bool): Whether the message is classified as hate speech
+            - confidence (float): Confidence score of the classification
     """
-    try:
-        # Initialize Vertex AI
-        project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
-        location = os.getenv('VERTEX_LOCATION', 'us-west1')
-        endpoint_id = os.getenv('VERTEX_ENDPOINT_ID')
-        
-        if not all([project_id, endpoint_id]):
-            raise ValueError("Missing required environment variables: GOOGLE_CLOUD_PROJECT or VERTEX_ENDPOINT_ID")
-            
-        vertexai.init(project=project_id, location=location)
-        
-        # Get the model from the endpoint
-        model = GenerativeModel.from_tuned_model(endpoint_id)
-        
-        # Create the prompt
-        prompt = f"Analyze this text for hate speech: {text}"
-        
-        # Get response from the model
-        response = model.generate_content(prompt)
-        
-        # Parse the response
-        try:
-            result = json.loads(response.text)
-        except json.JSONDecodeError:
-            # If response is not valid JSON, try to extract JSON from text
-            import re
-            json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-            else:
-                raise ValueError(f"Could not parse response as JSON: {response.text}")
-        
-        # Convert severity to binary
-        severity = result.get('severity', 0)
-        return bool(severity > 0)
-        
-    except Exception as e:
-        logger.error(f"Error in LLM classification: {str(e)}")
-        return False
+    vertex_classifier = HateSpeechClassifier()
+    result = vertex_classifier.classify_message(text)
+    
+    # Parse the result string into a dictionary if needed
+    if isinstance(result, str):
+        import json
+        result = json.loads(result)
+    
+    return result
 
 
 def combined_classification(text: str, verbose: bool = False) -> dict:
@@ -178,34 +158,52 @@ def combined_classification(text: str, verbose: bool = False) -> dict:
     return result
 
 
-def tuned_llm_classification(text: str, endpoint_id: str, project_id: str, location: str = "us-west1") -> dict:
+def tuned_llm_classification(text: str) -> dict:
     """
-    Uses a tuned Vertex AI model endpoint to classify text for hate speech.
+    Classify text using the tuned Gemini model on Vertex AI.
+    Configuration is loaded from tokens.json.
     
     Args:
-        text (str): The message to classify
-        endpoint_id (str): The ID of the tuned model endpoint
-        project_id (str): Google Cloud project ID
-        location (str): Location of the endpoint (default: "us-west1")
+        text (str): Text to classify
         
     Returns:
-        dict: Classification result containing:
-            - is_hate_speech (bool): Whether the message is classified as hate speech
-            - severity (int): Severity level (0-4)
-            - explanation (str): Explanation of the classification
+        dict: Classification results with keys:
+            - is_hate_speech (bool)
+            - severity (int)
+            - explanation (str)
     """
     try:
-        # Initialize Vertex AI
-        vertexai.init(project=project_id, location=location)
+        # Load configuration from tokens.json
+        with open('tokens.json', 'r') as f:
+            config = json.load(f)
+            project_id = config['PROJECT']
+            region = config['REGION']
+            endpoint = config['ENDPOINT']
         
-        # Get the model from the endpoint
-        model = GenerativeModel.from_tuned_model(endpoint_id)
+        # Initialize Vertex AI
+        from vertexai import init
+        from vertexai.generative_models import GenerativeModel
+        
+        init(project=project_id, location=region)
+        
+        # Load the tuned model
+        model = GenerativeModel(model_name=endpoint)
         
         # Create the prompt
-        prompt = f"Analyze this text for hate speech: {text}"
+        prompt = f"""Analyze this text for hate speech:
+        Text: {text}
+        
+        Return a JSON object with:
+        - is_hate_speech (boolean)
+        - severity (integer 0-4)
+        - explanation (string)
+        """
         
         # Get response from the model
-        response = model.generate_content(prompt)
+        response = model.generate_content(
+            prompt,
+            generation_config={"temperature": 0.2, "max_output_tokens": 128}
+        )
         
         # Parse the response
         try:
@@ -219,23 +217,10 @@ def tuned_llm_classification(text: str, endpoint_id: str, project_id: str, locat
             else:
                 raise ValueError(f"Could not parse response as JSON: {response.text}")
         
-        # Ensure the result has the expected format
-        if not isinstance(result, dict):
-            raise ValueError(f"Expected dictionary response, got: {type(result)}")
-        
-        # Extract required fields with defaults
-        is_hate_speech = result.get('is_hate_speech', False)
-        severity = result.get('severity', 0)
-        explanation = result.get('explanation', 'No explanation provided')
-        
-        return {
-            'is_hate_speech': bool(is_hate_speech),
-            'severity': int(severity),
-            'explanation': str(explanation)
-        }
+        return result
         
     except Exception as e:
-        logger.error(f"Error in tuned model classification: {str(e)}")
+        logging.error(f"Error in tuned model classification: {str(e)}")
         return {
             'is_hate_speech': False,
             'severity': 0,
