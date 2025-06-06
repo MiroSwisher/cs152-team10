@@ -4,7 +4,7 @@ from vertexai.tuning import sft         # only needed if you want to look up the
 
 PROJECT = "cs152-bot-461705"
 REGION  = "us-west1"                 # same region you tuned in
-ENDPOINT = "projects/cs152-bot-461705/locations/us-west1/endpoints/8783387065837420544"
+ENDPOINT = "projects/cs152-bot-461705/locations/us-west1/endpoints/6229846077118349312"
 
 # 1) Initialise once
 init(project=PROJECT, location=REGION)

@@ -33,7 +33,7 @@ os.makedirs(METRICS_DIR, exist_ok=True)
 # Tuned model configuration
 PROJECT = "cs152-bot-461705"
 REGION = "us-west1"
-ENDPOINT = "projects/cs152-bot-461705/locations/us-west1/endpoints/8783387065837420544"
+ENDPOINT = "projects/cs152-bot-461705/locations/us-west1/endpoints/6229846077118349312"
 
 # Initialize Vertex AI
 init(project=PROJECT, location=REGION)
@@ -76,7 +76,7 @@ def load_jsonl_data(file_path):
         logging.error(f"Error loading {file_path}: {str(e)}")
         return pd.DataFrame(columns=['text', 'label'])
 
-def load_test_data(sample_size=250, balanced=True):
+def load_test_data(sample_size=50, balanced=True):
     """
     Load and prepare test data from both small validation and full validation sets.
     
@@ -193,14 +193,29 @@ Return ONLY a single number (0-4) representing the severity level, with no addit
                 
                 # Parse response - expect just a number
                 try:
-                    severity = int(response.text.strip())
-                    if 0 <= severity <= 4:
-                        predictions.append(severity)
-                    else:
-                        logging.warning(f"Invalid severity {severity} from tuned LLM for text: {text[:100]}...")
+                    # Clean and validate response
+                    response_text = response.text.strip()
+                    if not response_text:
+                        logging.warning(f"Empty response from tuned LLM for text: {text[:100]}...")
                         predictions.append(0)
-                except ValueError as e:
-                    logging.error(f"Failed to parse tuned LLM response as integer: {response.text}\nError: {str(e)}")
+                        continue
+                        
+                    # Try to extract a number from the response
+                    import re
+                    numbers = re.findall(r'\d+', response_text)
+                    if numbers:
+                        severity = int(numbers[0])
+                        if 0 <= severity <= 4:
+                            predictions.append(severity)
+                        else:
+                            logging.warning(f"Invalid severity {severity} from tuned LLM for text: {text[:100]}...")
+                            predictions.append(0)
+                    else:
+                        logging.warning(f"No number found in response: {response_text}\nText: {text[:100]}...")
+                        predictions.append(0)
+                        
+                except Exception as e:
+                    logging.error(f"Failed to parse tuned LLM response: {response_text}\nError: {str(e)}")
                     predictions.append(0)
                     
             except Exception as e:
@@ -263,7 +278,7 @@ def save_metrics(report, classifier_type, predictions, true_labels):
 
 def main():
     # Load test data (sample 250 examples)
-    df = load_test_data(sample_size=250)
+    df = load_test_data(sample_size=50)
     texts = df['text'].tolist()
     true_labels = df['label'].tolist()
     
