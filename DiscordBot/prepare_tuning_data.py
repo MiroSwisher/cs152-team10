@@ -23,6 +23,7 @@ TRAIN_JSONL = os.path.join(BASE_DIR, 'train_data.jsonl')
 VAL_JSONL = os.path.join(BASE_DIR, 'val_data.jsonl')
 SMALL_TRAIN_JSONL = os.path.join(BASE_DIR, 'small_train_data.jsonl')
 SMALL_VAL_JSONL = os.path.join(BASE_DIR, 'small_val_data.jsonl')
+OUTPUT_PATH = os.path.join(BASE_DIR, 'balanced_train_data.jsonl')
 
 def severity_mapping(label, type_str):
     """Map dataset label and type to severity levels."""
@@ -230,5 +231,103 @@ def prepare_datasets():
     )
     logger.info(json.dumps(example, indent=2))
 
+def load_train_data():
+    """Load and process training data."""
+    logger.info("Loading training data...")
+    
+    texts = []
+    labels = []
+    original_jsons = []  # Keep original JSON structure
+    
+    try:
+        df = pd.read_json(TRAIN_JSONL, lines=True)
+        
+        for _, row in df.iterrows():
+            try:
+                # Get the text from the user's message
+                text = row['contents'][0]['parts'][0]['text'].replace("Analyze this text for hate speech: ", "")
+                
+                # Get the severity from the model's response
+                response = row['contents'][1]['parts'][0]['text']
+                response_json = json.loads(response)
+                severity = response_json['severity']
+                
+                texts.append(text)
+                labels.append(severity)
+                original_jsons.append(row.to_dict())  # Keep original format
+            except Exception as e:
+                logger.warning(f"Skipping malformed entry: {str(e)}")
+                continue
+            
+        return pd.DataFrame({
+            'text': texts,
+            'label': labels,
+            'original_json': original_jsons
+        })
+    except Exception as e:
+        logger.error(f"Error loading training data: {str(e)}")
+        return pd.DataFrame(columns=['text', 'label', 'original_json'])
+
+def create_balanced_dataset(df, samples_per_class=161):
+    """Create a balanced dataset with specified samples per class."""
+    logger.info(f"\nCreating balanced dataset with {samples_per_class} samples per severity level...")
+    
+    # Print initial distribution
+    label_dist = df['label'].value_counts().sort_index()
+    logger.info("\nInitial label distribution:")
+    for severity, count in label_dist.items():
+        logger.info(f"Severity {severity}: {count} samples")
+    
+    # Sample equally from each class
+    balanced_samples = []
+    for severity in range(5):
+        severity_samples = df[df['label'] == severity]
+        if len(severity_samples) >= samples_per_class:
+            severity_samples = severity_samples.sample(n=samples_per_class, random_state=42)
+            balanced_samples.append(severity_samples)
+        else:
+            logger.error(f"Not enough samples for severity {severity}. Need {samples_per_class} but only have {len(severity_samples)}.")
+            return None
+    
+    # Combine balanced samples
+    balanced_df = pd.concat(balanced_samples, ignore_index=True)
+    
+    # Print final distribution
+    final_dist = balanced_df['label'].value_counts().sort_index()
+    logger.info("\nFinal balanced label distribution:")
+    for severity, count in final_dist.items():
+        logger.info(f"Severity {severity}: {count} samples")
+    
+    return balanced_df
+
+def save_balanced_dataset(df, output_path):
+    """Save the balanced dataset in the original JSONL format."""
+    logger.info(f"\nSaving balanced dataset to {output_path}...")
+    
+    with open(output_path, 'w') as f:
+        for _, row in df.iterrows():
+            json.dump(row['original_json'], f)
+            f.write('\n')
+    
+    logger.info("Dataset saved successfully!")
+
+def main():
+    # Load training data
+    df = load_train_data()
+    if len(df) == 0:
+        logger.error("No data loaded. Exiting.")
+        return
+    
+    # Create balanced dataset
+    balanced_df = create_balanced_dataset(df, samples_per_class=161)
+    if balanced_df is None:
+        logger.error("Failed to create balanced dataset. Exiting.")
+        return
+    
+    # Save balanced dataset
+    save_balanced_dataset(balanced_df, OUTPUT_PATH)
+    
+    logger.info("\nDone! You can now use balanced_train_data.jsonl for fine-tuning.")
+
 if __name__ == "__main__":
-    prepare_datasets() 
+    main() 

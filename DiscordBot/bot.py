@@ -8,7 +8,7 @@ import re
 import requests
 from report import Report
 import pdb
-from classifier import load_model, predict_hate_speech, combined_classification
+from classifier import load_model, predict_severity, combined_classification
 from hate_speech_classifier import HateSpeechClassifier
 
 # Set up logging to the console
@@ -149,20 +149,27 @@ class ModBot(discord.Client):
     def eval_text(self, message):
         """
         Run the combined hate speech classification system.
-        First uses traditional classifier, then double-checks with LLM if needed.
+        Returns severity level and confidence.
         """
         try:
-            # Use combined classification which handles both traditional and LLM
-            result = combined_classification(message, verbose=True)
-            is_hate = result['is_hate_speech']
-            confidence = result['confidence']
+            # Get severity from traditional classifier
+            vectorizer, clf = self.vectorizer, self.traditional_classifier
+            severity = predict_severity(message, vectorizer, clf)
             
-            # Map confidence to severity (simplified for now)
-            severity = 3 if is_hate and confidence == 'high' else \
-                      2 if is_hate and confidence == 'medium' else \
-                      1 if is_hate else 0
+            # Get LLM prediction
+            llm_result = self.llm_classifier.classify_message(message, verbose=True)
+            if isinstance(llm_result, str):
+                llm_result = json.loads(llm_result)
+            llm_severity = llm_result.get('severity', 0)
             
-            return is_hate, confidence, severity
+            # Take max severity between both classifiers
+            final_severity = max(severity, llm_severity)
+            
+            # Determine if it's hate speech based on severity
+            is_hate = final_severity > 0
+            confidence = 'high' if severity == llm_severity else 'medium'
+            
+            return is_hate, confidence, final_severity
             
         except Exception as e:
             logger.error(f"Error in eval_text: {str(e)}")

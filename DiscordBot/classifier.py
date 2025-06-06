@@ -25,10 +25,20 @@ METRICS_PATH = os.path.join(BASE_DIR, 'metrics.json')
 # Configure logger
 logger = logging.getLogger(__name__)
 
-
-def binary_mapping(label, type_str):
-    # Map dataset label to binary classification (0: non-hate, 1: hate)
-    return 1 if label == 'hate' else 0
+def severity_mapping(label, type_str):
+    # Map dataset label and type to severity levels
+    if label != 'hate':
+        return 0
+    if type_str == 'animosity':
+        return 1
+    elif type_str in ['derogation', 'dehumanization']:
+        return 2
+    elif type_str == 'threatening':
+        return 3
+    elif type_str == 'support':
+        return 4
+    else:
+        return 1
 
 
 def train_and_save():
@@ -76,8 +86,8 @@ def load_model():
     return vectorizer, clf
 
 
-def predict_hate_speech(text, vectorizer, clf):
-    # Predict if text contains hate speech (binary)
+def predict_severity(text, vectorizer, clf):
+    # Predict severity for a single text input
     vec = vectorizer.transform([text])
     return int(clf.predict(vec)[0])
 
@@ -121,39 +131,36 @@ def combined_classification(text: str, verbose: bool = False) -> dict:
         
     Returns:
         dict: Combined classification result containing:
-            - is_hate_speech (bool): Whether the message is classified as hate speech
-            - traditional_prediction (bool): Prediction from traditional classifier
-            - llm_prediction (bool): Prediction from LLM classifier
+            - severity (int): Severity level (0-4)
+            - traditional_severity (int): Severity from traditional classifier
+            - llm_severity (int): Severity from LLM classifier
             - confidence (str): 'high' if both classifiers agree, 'medium' if they disagree
             - combined_confidence (float): Combined confidence score (only in verbose mode)
     """
     # Get traditional ML prediction
     vectorizer, clf = load_model()
-    trad_pred = bool(predict_hate_speech(text, vectorizer, clf))
+    trad_severity = predict_severity(text, vectorizer, clf)
     
     # Get LLM prediction
-    llm_pred = llm_classification(text)
+    llm_result = llm_classification(text)
+    if isinstance(llm_result, str):
+        import json
+        llm_result = json.loads(llm_result)
+    llm_severity = llm_result.get('severity', 0)
     
-    # Smart combination strategy:
-    # 1. If both classifiers agree, use their prediction
-    # 2. If they disagree, prefer the LLM prediction since it has better accuracy
-    # 3. For edge cases (very short messages or specific patterns), use traditional ML
-    is_hate_speech = llm_pred if trad_pred != llm_pred else trad_pred
-    
-    # Edge case handling
-    if len(text.split()) <= 2:  # Very short messages
-        is_hate_speech = trad_pred  # Traditional ML often better with short texts
+    # Take max severity between classifiers
+    final_severity = max(trad_severity, llm_severity)
     
     result = {
-        'traditional_prediction': trad_pred,
-        'llm_prediction': llm_pred,
-        'is_hate_speech': is_hate_speech,
-        'confidence': 'high' if trad_pred == llm_pred else 'medium'
+        'traditional_severity': trad_severity,
+        'llm_severity': llm_severity,
+        'severity': final_severity,
+        'confidence': 'high' if trad_severity == llm_severity else 'medium'
     }
     
     if verbose:
         # Calculate combined confidence based on agreement
-        result['combined_confidence'] = 0.9 if trad_pred == llm_pred else 0.5
+        result['combined_confidence'] = 0.9 if trad_severity == llm_severity else 0.5
     
     return result
 
@@ -168,9 +175,8 @@ def tuned_llm_classification(text: str) -> dict:
         
     Returns:
         dict: Classification results with keys:
-            - is_hate_speech (bool)
-            - severity (int)
-            - explanation (str)
+            - severity (int): Severity level (0-4)
+            - explanation (str): Explanation of the classification
     """
     try:
         # Load configuration from tokens.json
@@ -181,48 +187,38 @@ def tuned_llm_classification(text: str) -> dict:
             endpoint = config['ENDPOINT']
         
         # Initialize Vertex AI
-        from vertexai import init
-        from vertexai.generative_models import GenerativeModel
-        
-        init(project=project_id, location=region)
+        vertexai.init(project=project_id, location=region)
         
         # Load the tuned model
         model = GenerativeModel(model_name=endpoint)
         
         # Create the prompt
-        prompt = f"""Analyze this text for hate speech:
-        Text: {text}
+        prompt = f"""Analyze this text for hate speech: {text}
+
+Please classify the severity of hate speech in this text on a scale from 0-4:
+0: Non-Hateful
+1: Mild Hate (animosity)
+2: Moderate Hate (derogation, dehumanization)
+3: Severe Hate (threatening)
+4: Extremist Hate (support for hate)
+
+Respond in JSON format with:
+- severity (int): The severity level (0-4)
+- explanation (str): Brief explanation of the classification"""
         
-        Return a JSON object with:
-        - is_hate_speech (boolean)
-        - severity (integer 0-4)
-        - explanation (string)
-        """
+        # Get response from model
+        response = model.generate_content(prompt)
         
-        # Get response from the model
-        response = model.generate_content(
-            prompt,
-            generation_config={"temperature": 0.2, "max_output_tokens": 128}
-        )
-        
-        # Parse the response
+        # Parse response
         try:
             result = json.loads(response.text)
+            # Ensure severity is an integer
+            result['severity'] = int(result.get('severity', 0))
+            return result
         except json.JSONDecodeError:
-            # If response is not valid JSON, try to extract JSON from text
-            import re
-            json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-            else:
-                raise ValueError(f"Could not parse response as JSON: {response.text}")
-        
-        return result
-        
+            logger.error(f"Failed to parse tuned LLM response as JSON: {response.text}")
+            return {'severity': 0, 'explanation': 'Failed to parse model response'}
+            
     except Exception as e:
-        logging.error(f"Error in tuned model classification: {str(e)}")
-        return {
-            'is_hate_speech': False,
-            'severity': 0,
-            'explanation': f"Error in classification: {str(e)}"
-        } 
+        logger.error(f"Error in tuned LLM classification: {str(e)}")
+        return {'severity': 0, 'explanation': f'Error: {str(e)}'} 
