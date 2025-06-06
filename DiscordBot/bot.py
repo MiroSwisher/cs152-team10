@@ -8,7 +8,9 @@ import re
 import requests
 from report import Report
 import pdb
-from classifier import load_model, predict_severity, combined_classification
+from classifier import load_model, predict_severity, tuned_llm_classification
+from vertexai import init
+from vertexai.generative_models import GenerativeModel
 from hate_speech_classifier import HateSpeechClassifier
 
 # Set up logging to the console
@@ -26,7 +28,13 @@ with open(token_path) as f:
     # If you get an error here, it means your token is formatted incorrectly. Did you put it in quotes?
     tokens = json.load(f)
     discord_token = tokens['discord']
+    project_id = tokens['PROJECT']
+    region = tokens['REGION']
+    endpoint = tokens['ENDPOINT']
 
+# Initialize Vertex AI
+init(project=project_id, location=region)
+tuned_model = GenerativeModel(model_name=endpoint)
 
 class ModBot(discord.Client):
     def __init__(self): 
@@ -46,7 +54,7 @@ class ModBot(discord.Client):
         self.violation_history = {}  # offender_id -> violation count
         # Optional: track reporters for false-reporting flags
         self.flagged_reporters = set()
-        # Load both classifiers
+        # Load traditional classifier
         self.vectorizer, self.traditional_classifier = load_model()
         self.llm_classifier = HateSpeechClassifier(project_id=os.getenv('GOOGLE_CLOUD_PROJECT'), location='us-central1')
         # Define severity labels
@@ -156,23 +164,46 @@ class ModBot(discord.Client):
             vectorizer, clf = self.vectorizer, self.traditional_classifier
             severity = predict_severity(message, vectorizer, clf)
             
-            # Get LLM prediction
-            llm_result = self.llm_classifier.classify_message(message, verbose=True)
-            if isinstance(llm_result, str):
-                try:
-                    # Remove markdown formatting if present
-                    if llm_result.startswith('```'):
-                        # Extract content between backticks
-                        content = llm_result.split('```')[1]
-                        # Remove 'json' if present
-                        if content.startswith('json'):
-                            content = content[4:]
-                        llm_result = content.strip()
-                    llm_result = json.loads(llm_result)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse LLM result as JSON: {llm_result}, error: {str(e)}")
-                    llm_result = {}
-            llm_severity = llm_result.get('severity', 0)
+            # Get tuned LLM prediction
+            prompt = f"""Analyze this text for hate speech: {message}
+
+Please classify the severity of hate speech in this text on a scale from 0-4:
+0: Non-Hateful
+1: Mild Hate (animosity)
+2: Moderate Hate (derogation, dehumanization)
+3: Severe Hate (threatening)
+4: Extremist Hate (support for hate)
+
+Return ONLY a single number (0-4) representing the severity level, with no additional text or explanation."""
+
+            # Get response from tuned model
+            response = tuned_model.generate_content(
+                prompt,
+                generation_config={"temperature": 0.2, "max_output_tokens": 128}
+            )
+            
+            # Parse response - expect just a number
+            try:
+                # Clean and validate response
+                response_text = response.text.strip()
+                if not response_text:
+                    logger.warning(f"Empty response from tuned LLM for text: {message[:100]}...")
+                    llm_severity = 0
+                else:
+                    # Try to extract a number from the response
+                    import re
+                    numbers = re.findall(r'\d+', response_text)
+                    if numbers:
+                        llm_severity = int(numbers[0])
+                        if not 0 <= llm_severity <= 4:
+                            logger.warning(f"Invalid severity {llm_severity} from tuned LLM for text: {message[:100]}...")
+                            llm_severity = 0
+                    else:
+                        logger.warning(f"No number found in response: {response_text}\nText: {message[:100]}...")
+                        llm_severity = 0
+            except Exception as e:
+                logger.error(f"Failed to parse tuned LLM response: {response_text}\nError: {str(e)}")
+                llm_severity = 0
             
             # Take max severity between both classifiers
             final_severity = max(severity, llm_severity)
