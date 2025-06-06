@@ -1,51 +1,51 @@
 {
   "classification_report": {
     "0": {
-      "precision": 0.75,
-      "recall": 0.9,
-      "f1-score": 0.8181818181818182,
-      "support": 10.0
+      "precision": 0.7636363636363637,
+      "recall": 0.84,
+      "f1-score": 0.8,
+      "support": 50.0
     },
     "1": {
-      "precision": 0.5,
-      "recall": 0.3,
-      "f1-score": 0.375,
-      "support": 10.0
+      "precision": 0.4827586206896552,
+      "recall": 0.28,
+      "f1-score": 0.35443037974683544,
+      "support": 50.0
     },
     "2": {
-      "precision": 0.46153846153846156,
-      "recall": 0.6,
-      "f1-score": 0.5217391304347826,
-      "support": 10.0
+      "precision": 0.5538461538461539,
+      "recall": 0.72,
+      "f1-score": 0.6260869565217392,
+      "support": 50.0
     },
     "3": {
-      "precision": 0.8181818181818182,
-      "recall": 0.9,
-      "f1-score": 0.8571428571428571,
-      "support": 10.0
+      "precision": 0.7962962962962963,
+      "recall": 0.86,
+      "f1-score": 0.8269230769230769,
+      "support": 50.0
     },
     "4": {
-      "precision": 1.0,
-      "recall": 0.8,
-      "f1-score": 0.8888888888888888,
-      "support": 10.0
-    },
-    "accuracy": 0.7,
-    "macro avg": {
-      "precision": 0.705944055944056,
-      "recall": 0.7,
-      "f1-score": 0.6921905389296694,
+      "precision": 0.9574468085106383,
+      "recall": 0.9,
+      "f1-score": 0.9278350515463918,
       "support": 50.0
+    },
+    "accuracy": 0.72,
+    "macro avg": {
+      "precision": 0.7107968485958215,
+      "recall": 0.72,
+      "f1-score": 0.7070550929476086,
+      "support": 250.0
     },
     "weighted avg": {
-      "precision": 0.705944055944056,
-      "recall": 0.7,
-      "f1-score": 0.6921905389296694,
-      "support": 50.0
+      "precision": 0.7107968485958215,
+      "recall": 0.72,
+      "f1-score": 0.7070550929476086,
+      "support": 250.0
     }
   },
   "classifier_type": "tuned_llm",
-  "total_samples": 50,
+  "total_samples": 250,
   "label_distribution": {
     "0": 0,
     "1": 0,
