@@ -4,12 +4,14 @@
 # Please cite: Bertie Vidgen et al., Proceedings of ACL 2021: https://arxiv.org/abs/2012.15761
 import os
 import json
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from hate_speech_classifier import HateSpeechClassifier
 from sklearn.metrics import classification_report
 import pandas as pd
 import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from hate_speech_classifier import HateSpeechClassifier
 
 # Paths
 BASE_DIR = os.path.dirname(__file__)
