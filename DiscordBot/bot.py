@@ -159,7 +159,19 @@ class ModBot(discord.Client):
             # Get LLM prediction
             llm_result = self.llm_classifier.classify_message(message, verbose=True)
             if isinstance(llm_result, str):
-                llm_result = json.loads(llm_result)
+                try:
+                    # Remove markdown formatting if present
+                    if llm_result.startswith('```'):
+                        # Extract content between backticks
+                        content = llm_result.split('```')[1]
+                        # Remove 'json' if present
+                        if content.startswith('json'):
+                            content = content[4:]
+                        llm_result = content.strip()
+                    llm_result = json.loads(llm_result)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse LLM result as JSON: {llm_result}, error: {str(e)}")
+                    llm_result = {}
             llm_severity = llm_result.get('severity', 0)
             
             # Take max severity between both classifiers

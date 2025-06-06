@@ -2,50 +2,50 @@
   "classification_report": {
     "0": {
       "precision": 0.7636363636363637,
-      "recall": 0.84,
-      "f1-score": 0.8,
-      "support": 50.0
+      "recall": 0.8235294117647058,
+      "f1-score": 0.7924528301886793,
+      "support": 51.0
     },
     "1": {
-      "precision": 0.4827586206896552,
-      "recall": 0.28,
-      "f1-score": 0.35443037974683544,
-      "support": 50.0
+      "precision": 0.42424242424242425,
+      "recall": 0.27450980392156865,
+      "f1-score": 0.3333333333333333,
+      "support": 51.0
     },
     "2": {
-      "precision": 0.5538461538461539,
-      "recall": 0.72,
-      "f1-score": 0.6260869565217392,
-      "support": 50.0
+      "precision": 0.5396825396825397,
+      "recall": 0.6666666666666666,
+      "f1-score": 0.5964912280701754,
+      "support": 51.0
     },
     "3": {
-      "precision": 0.7962962962962963,
-      "recall": 0.86,
-      "f1-score": 0.8269230769230769,
-      "support": 50.0
+      "precision": 0.7719298245614035,
+      "recall": 0.8627450980392157,
+      "f1-score": 0.8148148148148148,
+      "support": 51.0
     },
     "4": {
       "precision": 0.9574468085106383,
-      "recall": 0.9,
-      "f1-score": 0.9278350515463918,
-      "support": 50.0
+      "recall": 0.8823529411764706,
+      "f1-score": 0.9183673469387755,
+      "support": 51.0
     },
-    "accuracy": 0.72,
+    "accuracy": 0.7019607843137254,
     "macro avg": {
-      "precision": 0.7107968485958215,
-      "recall": 0.72,
-      "f1-score": 0.7070550929476086,
-      "support": 250.0
+      "precision": 0.6913875921266739,
+      "recall": 0.7019607843137254,
+      "f1-score": 0.6910919106691557,
+      "support": 255.0
     },
     "weighted avg": {
-      "precision": 0.7107968485958215,
-      "recall": 0.72,
-      "f1-score": 0.7070550929476086,
-      "support": 250.0
+      "precision": 0.6913875921266739,
+      "recall": 0.7019607843137254,
+      "f1-score": 0.6910919106691557,
+      "support": 255.0
     }
   },
   "classifier_type": "tuned_llm",
-  "total_samples": 250,
+  "total_samples": 255,
   "label_distribution": {
     "0": 0,
     "1": 0,

@@ -25,6 +25,7 @@ METRICS_PATH = os.path.join(BASE_DIR, 'metrics.json')
 # Configure logger
 logger = logging.getLogger(__name__)
 
+# were we aware of how bad this dataset is? a ton of examples are simply not given granularity levels
 def severity_mapping(label, type_str):
     # Map dataset label and type to severity levels
     if label != 'hate':

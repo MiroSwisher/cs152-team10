@@ -278,7 +278,7 @@ def save_metrics(report, classifier_type, predictions, true_labels):
 
 def main():
     # Load test data (sample 250 examples)
-    df = load_test_data(sample_size=50)
+    df = load_test_data(sample_size=1000)
     texts = df['text'].tolist()
     true_labels = df['label'].tolist()
     

@@ -1,51 +1,51 @@
 {
   "classification_report": {
     "0": {
-      "precision": 0.7391304347826086,
-      "recall": 0.68,
-      "f1-score": 0.7083333333333334,
-      "support": 50.0
+      "precision": 0.7777777777777778,
+      "recall": 0.6862745098039216,
+      "f1-score": 0.7291666666666666,
+      "support": 51.0
     },
     "1": {
-      "precision": 0.3181818181818182,
-      "recall": 0.28,
-      "f1-score": 0.2978723404255319,
-      "support": 50.0
+      "precision": 0.3617021276595745,
+      "recall": 0.3333333333333333,
+      "f1-score": 0.3469387755102041,
+      "support": 51.0
     },
     "2": {
-      "precision": 0.37333333333333335,
-      "recall": 0.56,
-      "f1-score": 0.448,
-      "support": 50.0
+      "precision": 0.36619718309859156,
+      "recall": 0.5098039215686274,
+      "f1-score": 0.4262295081967213,
+      "support": 51.0
     },
     "3": {
-      "precision": 0.45,
-      "recall": 0.36,
-      "f1-score": 0.4,
-      "support": 50.0
+      "precision": 0.4166666666666667,
+      "recall": 0.39215686274509803,
+      "f1-score": 0.40404040404040403,
+      "support": 51.0
     },
     "4": {
-      "precision": 0.4888888888888889,
-      "recall": 0.44,
-      "f1-score": 0.4631578947368421,
-      "support": 50.0
+      "precision": 0.4772727272727273,
+      "recall": 0.4117647058823529,
+      "f1-score": 0.4421052631578947,
+      "support": 51.0
     },
-    "accuracy": 0.464,
+    "accuracy": 0.4666666666666667,
     "macro avg": {
-      "precision": 0.4739068950373298,
-      "recall": 0.46399999999999997,
-      "f1-score": 0.46347271369914145,
-      "support": 250.0
+      "precision": 0.4799232964950676,
+      "recall": 0.4666666666666666,
+      "f1-score": 0.46969612351437817,
+      "support": 255.0
     },
     "weighted avg": {
-      "precision": 0.4739068950373298,
-      "recall": 0.464,
-      "f1-score": 0.46347271369914156,
-      "support": 250.0
+      "precision": 0.47992329649506754,
+      "recall": 0.4666666666666667,
+      "f1-score": 0.46969612351437817,
+      "support": 255.0
     }
   },
   "classifier_type": "llm",
-  "total_samples": 250,
+  "total_samples": 255,
   "label_distribution": {
     "0": 0,
     "1": 0,
