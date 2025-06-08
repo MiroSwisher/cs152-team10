@@ -242,7 +242,6 @@ class ModBot(discord.Client):
                 await message.channel.send("Please specify a user to unshadow. Use .help for commands.")
                 return
             # Extract numeric ID from mention or ID string
-            import re
             user_id_str = re.sub(r'\D', '', args[0])
             try:
                 uid = int(user_id_str)
@@ -259,7 +258,6 @@ class ModBot(discord.Client):
             if not args:
                 await message.channel.send("Please specify a user to unblock. Use .help for commands.")
                 return
-            import re
             user_id_str = re.sub(r'\D', '', args[0])
             try:
                 uid = int(user_id_str)
