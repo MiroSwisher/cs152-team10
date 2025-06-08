@@ -1,0 +1,87 @@
+{
+  "classification_report": {
+    "0": {
+      "precision": 0.5760252365930599,
+      "recall": 0.4929805615550756,
+      "f1-score": 0.531277276694792,
+      "support": 1852.0
+    },
+    "1": {
+      "precision": 0.5417895771878073,
+      "recall": 0.5106580166821131,
+      "f1-score": 0.5257633587786259,
+      "support": 1079.0
+    },
+    "2": {
+      "precision": 0.38369304556354916,
+      "recall": 0.43399638336347196,
+      "f1-score": 0.4072974119643615,
+      "support": 1106.0
+    },
+    "3": {
+      "precision": 0.10552763819095477,
+      "recall": 0.4375,
+      "f1-score": 0.1700404858299595,
+      "support": 48.0
+    },
+    "4": {
+      "precision": 0.19117647058823528,
+      "recall": 0.37142857142857144,
+      "f1-score": 0.2524271844660194,
+      "support": 35.0
+    },
+    "accuracy": 0.48009708737864076,
+    "macro avg": {
+      "precision": 0.3596423936247213,
+      "recall": 0.4493127066058464,
+      "f1-score": 0.3773611435467517,
+      "support": 4120.0
+    },
+    "weighted avg": {
+      "precision": 0.5066773552070463,
+      "recall": 0.48009708737864076,
+      "f1-score": 0.48997378955573406,
+      "support": 4120.0
+    }
+  },
+  "classifier_params": {
+    "C": "1.0",
+    "class_weight": "balanced",
+    "dual": "False",
+    "fit_intercept": "True",
+    "intercept_scaling": "1",
+    "l1_ratio": "None",
+    "max_iter": "1000",
+    "multi_class": "deprecated",
+    "n_jobs": "None",
+    "penalty": "l2",
+    "random_state": "None",
+    "solver": "lbfgs",
+    "tol": "0.0001",
+    "verbose": "0",
+    "warm_start": "False"
+  },
+  "vectorizer_params": {
+    "analyzer": "word",
+    "binary": "False",
+    "decode_error": "strict",
+    "dtype": "<class 'numpy.float64'>",
+    "encoding": "utf-8",
+    "input": "content",
+    "lowercase": "True",
+    "max_df": "1.0",
+    "max_features": "10000",
+    "min_df": "1",
+    "ngram_range": "(1, 2)",
+    "norm": "l2",
+    "preprocessor": "None",
+    "smooth_idf": "True",
+    "stop_words": "english",
+    "strip_accents": "None",
+    "sublinear_tf": "False",
+    "token_pattern": "(?u)\\b\\w\\w+\\b",
+    "tokenizer": "None",
+    "use_idf": "True",
+    "vocabulary": "None"
+  }
+}

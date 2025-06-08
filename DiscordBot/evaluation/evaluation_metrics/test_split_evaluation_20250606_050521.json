@@ -1,0 +1,214 @@
+{
+  "timestamp": "20250606_050521",
+  "sample_size": 500,
+  "traditional_classifier": {
+    "classification_report": {
+      "0": {
+        "precision": 0.562874251497006,
+        "recall": 0.43119266055045874,
+        "f1-score": 0.4883116883116883,
+        "support": 218.0
+      },
+      "1": {
+        "precision": 0.7050359712230215,
+        "recall": 0.3475177304964539,
+        "f1-score": 0.4655581947743468,
+        "support": 282.0
+      },
+      "2": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 0.0
+      },
+      "3": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 0.0
+      },
+      "4": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 0.0
+      },
+      "accuracy": 0.384,
+      "macro avg": {
+        "precision": 0.25358204454400546,
+        "recall": 0.15574207820938252,
+        "f1-score": 0.19077397661720702,
+        "support": 500.0
+      },
+      "weighted avg": {
+        "precision": 0.6430534614224788,
+        "recall": 0.384,
+        "f1-score": 0.4754787179566277,
+        "support": 500.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        94,
+        41,
+        69,
+        12,
+        2
+      ],
+      [
+        73,
+        98,
+        95,
+        12,
+        4
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "evaluation_time": 0.17870521545410156
+  },
+  "base_llm": {
+    "classification_report": {
+      "0": {
+        "precision": 0.8490566037735849,
+        "recall": 0.6192660550458715,
+        "f1-score": 0.7161803713527851,
+        "support": 218.0
+      },
+      "1": {
+        "precision": 0.5798319327731093,
+        "recall": 0.24468085106382978,
+        "f1-score": 0.34413965087281795,
+        "support": 282.0
+      },
+      "2": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 0.0
+      },
+      "3": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 0.0
+      },
+      "4": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 0.0
+      },
+      "accuracy": 0.408,
+      "macro avg": {
+        "precision": 0.2857777073093389,
+        "recall": 0.17278938122194026,
+        "f1-score": 0.2120640044451206,
+        "support": 500.0
+      },
+      "weighted avg": {
+        "precision": 0.6972138893293166,
+        "recall": 0.408,
+        "f1-score": 0.5063494050020837,
+        "support": 500.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        135,
+        50,
+        21,
+        12,
+        0
+      ],
+      [
+        24,
+        69,
+        125,
+        36,
+        28
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "evaluation_time": 417.36640310287476
+  },
+  "tuned_llm": {
+    "classification_report": {
+      "0": {
+        "precision": 0.436,
+        "recall": 1.0,
+        "f1-score": 0.6072423398328691,
+        "support": 218.0
+      },
+      "1": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 282.0
+      },
+      "accuracy": 0.436,
+      "macro avg": {
+        "precision": 0.218,
+        "recall": 0.5,
+        "f1-score": 0.30362116991643456,
+        "support": 500.0
+      },
+      "weighted avg": {
+        "precision": 0.19009600000000001,
+        "recall": 0.436,
+        "f1-score": 0.2647576601671309,
+        "support": 500.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        218,
+        0
+      ],
+      [
+        282,
+        0
+      ]
+    ],
+    "evaluation_time": 189.52794981002808
+  }
+}

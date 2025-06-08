@@ -8,7 +8,10 @@ import re
 import requests
 from report import Report
 import pdb
-from classifier import load_model, predict_severity
+from classifier import load_model, predict_severity, tuned_llm_classification
+from vertexai import init
+from vertexai.generative_models import GenerativeModel
+from hate_speech_classifier import HateSpeechClassifier
 
 # Set up logging to the console
 logger = logging.getLogger('discord')
@@ -25,7 +28,13 @@ with open(token_path) as f:
     # If you get an error here, it means your token is formatted incorrectly. Did you put it in quotes?
     tokens = json.load(f)
     discord_token = tokens['discord']
+    project_id = tokens['PROJECT']
+    region = tokens['REGION']
+    endpoint = tokens['ENDPOINT']
 
+# Initialize Vertex AI
+init(project=project_id, location=region)
+tuned_model = GenerativeModel(model_name=endpoint)
 
 class ModBot(discord.Client):
     def __init__(self): 
@@ -45,8 +54,10 @@ class ModBot(discord.Client):
         self.violation_history = {}  # offender_id -> violation count
         # Optional: track reporters for false-reporting flags
         self.flagged_reporters = set()
-        # Load hate speech classifier and define severity labels
-        self.vectorizer, self.classifier = load_model()
+        # Load traditional classifier
+        self.vectorizer, self.traditional_classifier = load_model()
+        self.llm_classifier = HateSpeechClassifier(project_id=os.getenv('GOOGLE_CLOUD_PROJECT'), location='us-central1')
+        # Define severity labels
         self.severity_labels = {
             0: "Non-Hateful",
             1: "Mild Hate",
@@ -135,27 +146,83 @@ class ModBot(discord.Client):
             return
 
         # Automated detection and enforcement
-        severity = self.eval_text(message.content)
-        await self.take_action(severity, message)
+        is_hate, confidence, severity = self.eval_text(message.content)
+        await self.take_action(is_hate, confidence, message)
 
         # Forward the message to the mod channel with severity info
         mod_channel = self.mod_channels[message.guild.id]
         await mod_channel.send(f'Forwarded message:\n{message.author.name}: "{message.content}"')
-        await mod_channel.send(self.code_format(severity))
+        await mod_channel.send(self.code_format(is_hate, confidence, severity))
 
     def eval_text(self, message):
         """
-        Run the hate speech classifier and return a severity level (0-4).
+        Run the combined hate speech classification system.
+        Returns severity level and confidence.
         """
-        return predict_severity(message, self.vectorizer, self.classifier)
+        try:
+            # Get severity from traditional classifier
+            vectorizer, clf = self.vectorizer, self.traditional_classifier
+            severity = predict_severity(message, vectorizer, clf)
+            
+            # Get tuned LLM prediction
+            prompt = f"""Analyze this text for hate speech: {message}
 
-    def code_format(self, text):
+Please classify the severity of hate speech in this text on a scale from 0-4:
+0: Non-Hateful
+1: Mild Hate (animosity)
+2: Moderate Hate (derogation, dehumanization)
+3: Severe Hate (threatening)
+4: Extremist Hate (support for hate)
+
+Return ONLY a single number (0-4) representing the severity level, with no additional text or explanation."""
+
+            # Get response from tuned model
+            response = tuned_model.generate_content(
+                prompt,
+                generation_config={"temperature": 0.2, "max_output_tokens": 128}
+            )
+            
+            # Parse response - expect just a number
+            try:
+                # Clean and validate response
+                response_text = response.text.strip()
+                if not response_text:
+                    logger.warning(f"Empty response from tuned LLM for text: {message[:100]}...")
+                    llm_severity = 0
+                else:
+                    # Try to extract a number from the response
+                    numbers = re.findall(r'\d+', response_text)
+                    if numbers:
+                        llm_severity = int(numbers[0])
+                        if not 0 <= llm_severity <= 4:
+                            logger.warning(f"Invalid severity {llm_severity} from tuned LLM for text: {message[:100]}...")
+                            llm_severity = 0
+                    else:
+                        logger.warning(f"No number found in response: {response_text}\nText: {message[:100]}...")
+                        llm_severity = 0
+            except Exception as e:
+                logger.error(f"Failed to parse tuned LLM response: {response_text}\nError: {str(e)}")
+                llm_severity = 0
+            
+            # Take max severity between both classifiers
+            final_severity = max(severity, llm_severity)
+            
+            # Determine if it's hate speech based on severity
+            is_hate = final_severity > 0
+            confidence = 'high' if severity == llm_severity else 'medium'
+            
+            return is_hate, confidence, final_severity
+            
+        except Exception as e:
+            logger.error(f"Error in eval_text: {str(e)}")
+            return False, 'low', 0
+
+    def code_format(self, is_hate, confidence, severity):
         """
         Format the classifier output for the mod channel.
         """
-        severity = text
         label = self.severity_labels.get(severity, "Unknown")
-        return f"Automated detection severity: {severity} ({label})"
+        return f"Automated detection: {'Hate Speech' if is_hate else 'Non-Hate'} (Severity: {severity} - {label}, Confidence: {confidence})"
 
     async def handle_mod_message(self, message):
         """Handle moderator commands in the mod channel."""
@@ -242,7 +309,6 @@ class ModBot(discord.Client):
                 await message.channel.send("Please specify a user to unshadow. Use .help for commands.")
                 return
             # Extract numeric ID from mention or ID string
-            import re
             user_id_str = re.sub(r'\D', '', args[0])
             try:
                 uid = int(user_id_str)
@@ -253,13 +319,13 @@ class ModBot(discord.Client):
                 self.shadow_blocked.remove(uid)
                 await message.channel.send(f"User <@{uid}> is no longer shadow-blocked.")
             else:
-                await message.channel.send(f"User <@{uid}> is not shadow-blocked.")
+                await message.channel.send(f"User <@{uid}> was not shadow-blocked.")
             return
         if cmd == 'unblock':
             if not args:
                 await message.channel.send("Please specify a user to unblock. Use .help for commands.")
                 return
-            import re
+            # Extract numeric ID from mention or ID string
             user_id_str = re.sub(r'\D', '', args[0])
             try:
                 uid = int(user_id_str)
@@ -270,94 +336,74 @@ class ModBot(discord.Client):
                 self.blocked_users.remove(uid)
                 await message.channel.send(f"User <@{uid}> is no longer blocked.")
             else:
-                await message.channel.send(f"User <@{uid}> is not blocked.")
+                await message.channel.send(f"User <@{uid}> was not blocked.")
             return
-        if not args:
-            await message.channel.send("Please specify a report ID. Use .help for commands.")
-            return
-        # Parse report ID
-        try:
-            report_id = int(args[0])
-        except ValueError:
-            await message.channel.send("Report ID must be a number.")
-            return
-        if report_id not in self.report_store:
-            await message.channel.send(f"Report ID {report_id} not found.")
-            return
-        report = self.report_store[report_id]
-        guild = self.get_guild(report['guild_id'])
-        # Dismiss command
-        if cmd == 'dismiss':
-            # Mark as dismissed without removing
-            self.report_store[report_id]['status'] = 'dismissed'
-            await message.channel.send(f"Report {report_id} dismissed (no action). Report retained for further actions.")
-            return
-        # Remove offending message
-        if cmd == 'remove':
+        # Report action commands
+        if cmd in ['dismiss', 'remove', 'warn', 'shadow_block', 'block', 'escalate']:
+            if not args:
+                await message.channel.send(f"Please specify a report ID for {cmd}. Use .help for commands.")
+                return
             try:
-                channel = guild.get_channel(report['channel_id'])
-                msg = await channel.fetch_message(report['message_id'])
-                await msg.delete()
-                await message.channel.send(f"Offending message deleted for report {report_id}.")
-            except Exception as e:
-                await message.channel.send(f"Error deleting message: {e}")
-            self.report_store[report_id]['status'] = 'removed'
-            return
-        # Warn the user via DM
-        if cmd == 'warn':
-            reason = ' '.join(args[1:]) if len(args) > 1 else None
-            warning_text = f"Your message was flagged as {report['abuse_type']}."
-            if reason:
-                warning_text += f" Reason: {reason}"
-            # Attempt to fetch the user object directly
-            offender = None
-            try:
-                offender = await self.fetch_user(report['offender_id'])
-            except Exception:
-                pass
-            if offender:
+                rid = int(args[0])
+            except ValueError:
+                await message.channel.send("Report ID must be an integer.")
+                return
+            if rid not in self.report_store:
+                await message.channel.send(f"Report ID {rid} not found.")
+                return
+            data = self.report_store[rid]
+            if data.get('status') != 'pending':
+                await message.channel.send(f"Report #{rid} has already been resolved.")
+                return
+            # Get the message link and offender ID
+            msg_link = data['report_link']
+            offender_id = data['offender_id']
+            # Take the requested action
+            if cmd == 'dismiss':
+                data['status'] = 'dismissed'
+                await message.channel.send(f"Report #{rid} dismissed.")
+            elif cmd == 'remove':
+                # Extract message ID from the link
+                msg_id = int(msg_link.split('/')[-1])
                 try:
-                    await offender.send(warning_text)
+                    msg = await message.channel.fetch_message(msg_id)
+                    await msg.delete()
+                    data['status'] = 'removed'
+                    await message.channel.send(f"Message removed. Report #{rid} marked as resolved.")
+                except discord.NotFound:
+                    await message.channel.send("Message not found. It may have been deleted already.")
                 except discord.Forbidden:
-                    pass
-                await message.channel.send(f"Warning sent to {offender.mention} for report {report_id}.")
-            else:
-                await message.channel.send("Could not find user to warn.")
-            self.report_store[report_id]['status'] = 'warned'
-            return
-        # Shadow block: hide user's messages
-        if cmd == 'shadow_block':
-            self.shadow_blocked.add(report['offender_id'])
-            self.report_store[report_id]['status'] = 'shadow_blocked'
-            await message.channel.send(f"User <@{report['offender_id']}> has been shadow-blocked. Report retained.")
-            return
-        # Block: add to block-list and notify user
-        if cmd == 'block':
-            self.blocked_users.add(report['offender_id'])
-            # Notify user via DM
-            offender = None
-            try:
-                offender = await self.fetch_user(report['offender_id'])
-            except Exception:
-                pass
-            if offender:
+                    await message.channel.send("I don't have permission to delete that message.")
+            elif cmd == 'warn':
+                reason = ' '.join(args[1:]) if len(args) > 1 else "No reason provided"
                 try:
-                    await offender.send("You have been blocked from sending messages here.")
+                    offender = await self.fetch_user(offender_id)
+                    await offender.send(
+                        f"You have been warned for violating our community guidelines.\n"
+                        f"Reason: {reason}\n"
+                        f"Please review our rules and avoid further violations."
+                    )
+                    data['status'] = 'warned'
+                    await message.channel.send(f"Warning sent to <@{offender_id}>. Report #{rid} marked as resolved.")
                 except discord.Forbidden:
-                    pass
-            self.report_store[report_id]['status'] = 'blocked'
-            await message.channel.send(f"User <@{report['offender_id']}> has been blocked. Report retained.")
-            return
-        # Escalate to higher admin
-        if cmd == 'escalate':
-            self.report_store[report_id]['status'] = 'escalated'
-            await message.channel.send(f"Report {report_id} escalated to higher admin. Report retained.")
+                    await message.channel.send("Could not send warning DM to the user.")
+            elif cmd == 'shadow_block':
+                self.shadow_blocked.add(offender_id)
+                data['status'] = 'shadow_blocked'
+                await message.channel.send(f"User <@{offender_id}> is now shadow-blocked. Report #{rid} marked as resolved.")
+            elif cmd == 'block':
+                self.blocked_users.add(offender_id)
+                data['status'] = 'blocked'
+                await message.channel.send(f"User <@{offender_id}> is now blocked. Report #{rid} marked as resolved.")
+            elif cmd == 'escalate':
+                data['status'] = 'escalated'
+                await message.channel.send(f"Report #{rid} has been escalated to higher administration.")
             return
         # Unknown command
-        await message.channel.send("Unknown command. Use .help for a list of moderator commands.")
+        await message.channel.send("Unknown command. Use .help to see available commands.")
 
     async def on_reaction_add(self, reaction, user):
-        """When a user reacts with 🚩, start DM-based report flow using our new user flow."""
+        """When a user reacts with 🚩, start DM-based report flow."""
         if user.id == self.user.id:
             return
         channel = reaction.message.channel
@@ -387,72 +433,70 @@ class ModBot(discord.Client):
             "Reply with the number of your choice."
         )
 
-    async def take_action(self, severity, message):
-        """
-        Perform automated enforcement actions based on severity level.
-        """
+    async def take_action(self, is_hate, confidence, message):
+        """Take appropriate action based on hate speech detection."""
         offender_id = message.author.id
-        # Log automated flag as a report entry if severity >= 1
-        if severity >= 1:
+        
+        # Log automated flag as a report entry if hate speech detected
+        if is_hate:
             report_id = self.next_report_id
             self.next_report_id += 1
+            
             # Store automated report metadata
             self.report_store[report_id] = {
                 'report_id': report_id,
                 'reporter_id': self.user.id,
                 'abuse_type': 'hate speech',
-                'subtype': self.severity_labels.get(severity),
-                'filter_opt_in': None,
-                'block_opt_in': None,
+                'confidence': confidence,
                 'report_link': message.jump_url,
                 'offender_id': offender_id,
                 'guild_id': message.guild.id,
                 'channel_id': message.channel.id,
                 'message_id': message.id,
-                'context': None,
                 'status': 'automated'
             }
-        
-        # Mild hate: delete + warning
-        if severity == 1:
+            
+            # Delete the message
             await message.delete()
-            try:
-                await message.author.send(
-                    "Your message has been removed for mild hate speech (Severity 1). Please avoid derogatory language."
-                )
-            except discord.Forbidden:
-                pass
-            self.violation_history[offender_id] = self.violation_history.get(offender_id, 0) + 1
-        # Moderate hate: delete + shadow-block
-        elif severity == 2:
-            await message.delete()
-            self.shadow_blocked.add(offender_id)
-            self.violation_history[offender_id] = self.violation_history.get(offender_id, 0) + 1
+            
+            # Get mod channel
             mod_channel = self.mod_channels.get(message.guild.id)
-            if mod_channel:
-                await mod_channel.send(
-                    f"Automated detection: User <@{offender_id}> shadow-blocked for 24h (Severity 2: Moderate Hate). Original message: {message.jump_url}"
-                )
-        # Severe hate: delete + block
-        elif severity == 3:
-            await message.delete()
-            self.blocked_users.add(offender_id)
-            self.violation_history[offender_id] = self.violation_history.get(offender_id, 0) + 1
-            mod_channel = self.mod_channels.get(message.guild.id)
-            if mod_channel:
-                await mod_channel.send(
-                    f"Automated detection: User <@{offender_id}> blocked (Severity 3: Severe Hate). Original message: {message.jump_url}"
-                )
-        # Extremist hate: delete + permanent block + escalate
-        elif severity == 4:
-            await message.delete()
-            self.blocked_users.add(offender_id)
-            self.violation_history[offender_id] = self.violation_history.get(offender_id, 0) + 1
-            mod_channel = self.mod_channels.get(message.guild.id)
-            if mod_channel:
-                await mod_channel.send(
-                    f"Automated detection: User <@{offender_id}> permanently blocked & escalated (Severity 4: Extremist Hate). Original message: {message.jump_url}"
-                )
+            
+            # Update violation history
+            if offender_id not in self.violation_history:
+                self.violation_history[offender_id] = 0
+            self.violation_history[offender_id] += 1
+            
+            # Take action based on confidence and violation history
+            if confidence == 'high' or self.violation_history[offender_id] > 2:
+                # Block user for high confidence or repeat violations
+                self.blocked_users.add(offender_id)
+                if mod_channel:
+                    await mod_channel.send(
+                        f"🚫 Automated detection: User <@{offender_id}> blocked for hate speech "
+                        f"(Confidence: {confidence}, Violations: {self.violation_history[offender_id]}). "
+                        f"Original message: {message.jump_url}"
+                    )
+                try:
+                    await message.author.send("You have been blocked from sending messages here due to hate speech.")
+                except discord.Forbidden:
+                    pass
+            else:
+                # Shadow block for lower confidence
+                self.shadow_blocked.add(offender_id)
+                if mod_channel:
+                    await mod_channel.send(
+                        f"⚠️ Automated detection: User <@{offender_id}> shadow-blocked for 24h "
+                        f"(Confidence: {confidence}). Original message: {message.jump_url}"
+                    )
+                try:
+                    await message.author.send(
+                        "Your message has been removed for hate speech. "
+                        "Please avoid harmful language. Further violations may result in being blocked."
+                    )
+                except discord.Forbidden:
+                    pass
 
+# Run the bot
 client = ModBot()
 client.run(discord_token)
